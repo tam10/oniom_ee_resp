@@ -226,8 +226,8 @@ class ONIOM_Optimiser():
             com_obj.write("%mem={:d}MB\n".format(global_settings.mem_mb))
             com_obj.write("%nprocshared={:d}\n".format(global_settings.ncpus))
             com_obj.write("%chk={:s}.chk\n".format(base_fn))
-            if global_settings._last_calc:
-                com_obj.write("%oldchk={:s}.chk\n".format(global_settings._last_calc))
+            if global_settings.last_calc:
+                com_obj.write("%oldchk={:s}.chk\n".format(global_settings.last_calc))
             
             com_obj.write("{}\n\n".format(keywords_string))
             com_obj.write("{}\n\n".format(title))
@@ -253,7 +253,7 @@ class ONIOM_Optimiser():
         keywords = resp_settings.keywords.copy()
         keywords.update(global_settings.additional_keywords)
         keywords.update(resp_settings.additional_keywords)
-        if global_settings._last_calc:
+        if global_settings.last_calc:
             keywords.update({"guess": "read"})
             
         write_connectivity = "connectivity" in keywords["geom"]
@@ -261,7 +261,7 @@ class ONIOM_Optimiser():
         iops = resp_settings.iops.copy()
         
         keywords_string = self._get_keywords_string(keywords, iops, embed = resp_settings.use_embed)
-        oldchk_fn = "%oldchk={:s}.chk\n".format(global_settings._last_calc) if global_settings._last_calc else ""
+        oldchk_fn = "%oldchk={:s}.chk\n".format(global_settings.last_calc) if global_settings.last_calc else ""
         
         self.write_com(base_fn, keywords_string, title, oldchk_fn, write_connectivity)
         
@@ -332,6 +332,7 @@ class ONIOM_Optimiser():
                 opt_settings.converged = True
    
         opt_settings.step += 1
+        global_settings._last_calc = base_fn
 
     def get_missing_parameters(self, copy_com = False, copy_log = False, copy_chk = False):
         
@@ -357,6 +358,7 @@ class ONIOM_Optimiser():
         self._update_params_from_log(base_fn)
         
         params_settings.step += 1
+        global_settings._last_calc = base_fn
         
     def irc_optimise(self, copy_com = False, copy_log = False, copy_chk = False):
         
@@ -404,6 +406,7 @@ class ONIOM_Optimiser():
                     irc_settings.converged = True
    
         irc_settings.step += 1
+        global_settings._last_calc = base_fn
 
     def initialise(self):
     
@@ -854,6 +857,56 @@ class _ONIOM_Settings(object):
         self.irc_settings    = _IRC_Settings()
         self.resp_settings   = _RESP_Settings()
         self.params_settings = _Params_Settings()
+        
+    @property
+    def global_settings(self):
+        return self._global_settings
+    @global_settings.setter
+    def global_settings(self, value):
+        if isinstance(value, _Global_Settings):
+            self._global_settings = value
+        else:
+            raise ValueError("'global_settings' must be a _Global_Settings type, not {}".format(type(value)))
+            
+    @property
+    def opt_settings(self):
+        return self._opt_settings
+    @opt_settings.setter
+    def opt_settings(self, value):
+        if isinstance(value, _Opt_Settings):
+            self._opt_settings = value
+        else:
+            raise ValueError("'opt_settings' must be a _Opt_Settings type, not {}".format(type(value)))
+            
+    @property
+    def irc_settings(self):
+        return self._irc_settings
+    @irc_settings.setter
+    def irc_settings(self, value):
+        if isinstance(value, _IRC_Settings):
+            self._irc_settings = value
+        else:
+            raise ValueError("'irc_settings' must be a _IRC_Settings type, not {}".format(type(value)))
+            
+    @property
+    def resp_settings(self):
+        return self._resp_settings
+    @resp_settings.setter
+    def resp_settings(self, value):
+        if isinstance(value, _RESP_Settings):
+            self._resp_settings = value
+        else:
+            raise ValueError("'resp_settings' must be a _RESP_Settings type, not {}".format(type(value)))
+            
+    @property
+    def params_settings(self):
+        return self._params_settings
+    @params_settings.setter
+    def params_settings(self, value):
+        if isinstance(value, _Params_Settings):
+            self._params_settings = value
+        else:
+            raise ValueError("'params_settings' must be a _Params_Settings type, not {}".format(type(value)))
     
 class _Global_Settings(object):
     def __init__(self):
@@ -939,6 +992,183 @@ class _Global_Settings(object):
             if self.mem_mb < 0:
                 raise Exception("Negative memory allocated")
     
+    @property
+    def max_steps(self):
+        return self._max_steps
+    @max_steps.setter
+    def max_steps(self, value):
+        if isinstance(value, int):
+            self._max_steps = value
+        else:
+            raise ValueError("'max_steps' must be an int type, not {}".format(type(value)))
+        
+    @property
+    def irc_mode(self):
+        return self._irc_mode
+    @irc_mode.setter
+    def irc_mode(self, value):
+        if isinstance(value, bool):
+            self._irc_mode = value
+        else:
+            raise ValueError("'irc_mode' must be a boolean type, not {}".format(type(value)))
+            
+    @property
+    def additional_keywords(self):
+        return self._additional_keywords
+    @additional_keywords.setter
+    def additional_keywords(self, value):
+        if isinstance(value, str):
+            self._additional_keywords = value
+        else:
+            raise ValueError("'additional_keywords' must be a string, not {}".format(type(value)))
+            
+    @property
+    def base_name_prefix(self):
+        return self._base_name_prefix
+    @base_name_prefix.setter
+    def base_name_prefix(self, value):
+        if isinstance(value, str):
+            self._base_name_prefix = value
+        else:
+            raise ValueError("'base_name_prefix' must be a string type, not {}".format(type(value)))
+            
+    @property
+    def last_calc(self):
+        return self._last_calc
+    @last_calc.setter
+    def last_calc(self, value):
+        raise ValueError("'last_calc' is a read-only property")
+            
+    @property
+    def charges(self):
+        return self._charges
+    @charges.setter
+    def charges(self, value):
+        if isinstance(value, list):
+            self._charges = value
+        else:
+            raise ValueError("'charges' must be a list, not {}".format(type(value)))
+            
+    @property
+    def multiplicities(self):
+        return self._multiplicities
+    @multiplicities.setter
+    def multiplicities(self, value):
+        if isinstance(value, list):
+            self._multiplicities = value
+        else:
+            raise ValueError("'multiplicities' must be a list type, not {}".format(type(value)))
+            
+    @property
+    def mem_mb(self):
+        return self._mem_mb
+    @mem_mb.setter
+    def mem_mb(self, value):
+        if isinstance(value, int):
+            self._mem_mb = value
+        else:
+            raise ValueError("'mem_mb' must be an int type, not {}".format(type(value)))
+            
+    @property
+    def ncpus(self):
+        return self._ncpus
+    @ncpus.setter
+    def ncpus(self, value):
+        if isinstance(value, int):
+            self._ncpus = value
+        else:
+            raise ValueError("'ncpus' must be an int type, not {}".format(type(value)))
+            
+    @property
+    def overhead_mem_mb_per_cpu(self):
+        return self._overhead_mem_mb_per_cpu
+    @overhead_mem_mb_per_cpu.setter
+    def overhead_mem_mb_per_cpu(self, value):
+        if isinstance(value, int):
+            self._overhead_mem_mb_per_cpu = value
+        else:
+            raise ValueError("'overhead_mem_mb_per_cpu' must be an int type, not {}".format(type(value)))
+            
+    @property
+    def home(self):
+        return self._home
+    @home.setter
+    def home(self, value):
+        if isinstance(value, str):
+            self._home = value
+        else:
+            raise ValueError("'home' must be a string, not {}".format(type(value)))
+            
+    @property
+    def work(self):
+        return self._work
+    @work.setter
+    def work(self, value):
+        if isinstance(value, str):
+            self._work = value
+        else:
+            raise ValueError("'work' must be a string, not {}".format(type(value)))
+            
+    @property
+    def log_fn(self):
+        return self._log_fn
+    @log_fn.setter
+    def log_fn(self, value):
+        if isinstance(value, str):
+            self._log_fn = value
+        else:
+            raise ValueError("'log_fn' must be a string, not {}".format(type(value)))
+            
+    @property
+    def gaussian_run_command(self):
+        return self._gaussian_run_command
+    @gaussian_run_command.setter
+    def gaussian_run_command(self, value):
+        if isinstance(value, str):
+            self._gaussian_run_command = value
+        else:
+            raise ValueError("'gaussian_run_command' must be a string, not {}".format(type(value)))
+            
+    @property
+    def high_method(self):
+        return self._high_method
+    @high_method.setter
+    def high_method(self, value):
+        if isinstance(value, str):
+            self._high_method = value
+        else:
+            raise ValueError("'high_method' must be a string, not {}".format(type(value)))
+            
+    @property
+    def high_basis(self):
+        return self._high_basis
+    @high_basis.setter
+    def high_basis(self, value):
+        if isinstance(value, str):
+            self._high_basis = value
+        else:
+            raise ValueError("'high_basis' must be a string, not {}".format(type(value)))
+            
+    @property
+    def low_method(self):
+        return self._low_method
+    @low_method.setter
+    def low_method(self, value):
+        if isinstance(value, str):
+            self._low_method = value
+        else:
+            raise ValueError("'low_method' must be a string, not {}".format(type(value)))
+            
+    @property
+    def low_basis(self):
+        return self._low_basis
+    @low_basis.setter
+    def low_basis(self, value):
+        if isinstance(value, str):
+            self._low_basis = value
+        else:
+            raise ValueError("'low_basis' must be a string, not {}".format(type(value)))
+                
 class _Opt_Settings(object):
     def __init__(self):
         
@@ -960,6 +1190,126 @@ class _Opt_Settings(object):
         self.step  = 0
         
         self.converged = False
+        
+    @property
+    def restart(self):
+        return self._restart
+    @restart.setter
+    def restart(self, value):
+        if isinstance(value, bool):
+            self._restart = value
+        else:
+            raise ValueError("'restart' must be a boolean type, not {}".format(type(value)))
+        
+    @property
+    def max_steps(self):
+        return self._max_steps
+    @max_steps.setter
+    def max_steps(self, value):
+        if isinstance(value, int):
+            self._max_steps = value
+        else:
+            raise ValueError("'max_steps' must be an int type, not {}".format(type(value)))
+        
+    @property
+    def max_mm_steps(self):
+        return self._max_mm_steps
+    @max_mm_steps.setter
+    def max_mm_steps(self, value):
+        if isinstance(value, int):
+            self._max_mm_steps = value
+        else:
+            raise ValueError("'max_mm_steps' must be an int type, not {}".format(type(value)))
+        
+    @property
+    def step_size(self):
+        return self._step_size
+    @step_size.setter
+    def step_size(self, value):
+        if isinstance(value, int):
+            self._step_size = value
+        else:
+            raise ValueError("'step_size' must be an int type, not {}".format(type(value)))
+        
+    @property
+    def steps_per_hessian(self):
+        return self._steps_per_hessian
+    @steps_per_hessian.setter
+    def steps_per_hessian(self, value):
+        if isinstance(value, int):
+            self._steps_per_hessian = value
+        else:
+            raise ValueError("'steps_per_hessian' must be an int type, not {}".format(type(value)))
+        
+    @property
+    def keywords(self):
+        return self._keywords
+    @keywords.setter
+    def keywords(self, value):
+        if isinstance(value, dict):
+            self._keywords = value
+        else:
+            raise ValueError("'keywords' must be a dict type, not {}".format(type(value)))
+        
+    @property
+    def additional_keywords(self):
+        return self._additional_keywords
+    @additional_keywords.setter
+    def additional_keywords(self, value):
+        if isinstance(value, dict):
+            self._additional_keywords = value
+        else:
+            raise ValueError("'additional_keywords' must be a dict type, not {}".format(type(value)))
+        
+    @property
+    def iops(self):
+        return self._iops
+    @iops.setter
+    def iops(self, value):
+        if isinstance(value, dict):
+            self._iops = value
+        else:
+            raise ValueError("'iops' must be a dict type, not {}".format(type(value)))
+        
+    @property
+    def additional_print(self):
+        return self._additional_print
+    @additional_print.setter
+    def additional_print(self, value):
+        if isinstance(value, bool):
+            self._additional_print = value
+        else:
+            raise ValueError("'additional_print' must be a boolean type, not {}".format(type(value)))
+        
+    @property
+    def base_name(self):
+        return self._base_name
+    @base_name.setter
+    def base_name(self, value):
+        if isinstance(value, dict):
+            self._base_name = value
+        else:
+            raise ValueError("'base_name' must be a dict type, not {}".format(type(value)))
+        
+    @property
+    def step(self):
+        return self._step
+    @step.setter
+    def step(self, value):
+        if isinstance(value, int):
+            self._step = value
+        else:
+            raise ValueError("'step' must be an int type, not {}".format(type(value)))
+        
+    @property
+    def converged(self):
+        return self._converged
+    @converged.setter
+    def converged(self, value):
+        if isinstance(value, bool):
+            self._converged = value
+        else:
+            raise ValueError("'converged' must be a boolean type, not {}".format(type(value)))
     
 class _IRC_Settings(object):
     def __init__(self):
@@ -980,6 +1330,106 @@ class _IRC_Settings(object):
         self.step  = 0
         
         self.converged = False
+        
+    @property
+    def max_steps(self):
+        return self._max_steps
+    @max_steps.setter
+    def max_steps(self, value):
+        if isinstance(value, int):
+            self._max_steps = value
+        else:
+            raise ValueError("'max_steps' must be an int type, not {}".format(type(value)))
+        
+    @property
+    def max_mm_steps(self):
+        return self._max_mm_steps
+    @max_mm_steps.setter
+    def max_mm_steps(self, value):
+        if isinstance(value, int):
+            self._max_mm_steps = value
+        else:
+            raise ValueError("'max_mm_steps' must be an int type, not {}".format(type(value)))
+        
+    @property
+    def step_size(self):
+        return self._step_size
+    @step_size.setter
+    def step_size(self, value):
+        if isinstance(value, int):
+            self._step_size = value
+        else:
+            raise ValueError("'step_size' must be an int type, not {}".format(type(value)))
+        
+    @property
+    def keywords(self):
+        return self._keywords
+    @keywords.setter
+    def keywords(self, value):
+        if isinstance(value, dict):
+            self._keywords = value
+        else:
+            raise ValueError("'keywords' must be a dict type, not {}".format(type(value)))
+        
+    @property
+    def additional_keywords(self):
+        return self._additional_keywords
+    @additional_keywords.setter
+    def additional_keywords(self, value):
+        if isinstance(value, dict):
+            self._additional_keywords = value
+        else:
+            raise ValueError("'additional_keywords' must be a dict type, not {}".format(type(value)))
+        
+    @property
+    def iops(self):
+        return self._iops
+    @iops.setter
+    def iops(self, value):
+        if isinstance(value, dict):
+            self._iops = value
+        else:
+            raise ValueError("'iops' must be a dict type, not {}".format(type(value)))
+        
+    @property
+    def additional_print(self):
+        return self._additional_print
+    @additional_print.setter
+    def additional_print(self, value):
+        if isinstance(value, bool):
+            self._additional_print = value
+        else:
+            raise ValueError("'additional_print' must be a boolean type, not {}".format(type(value)))
+        
+    @property
+    def base_name(self):
+        return self._base_name
+    @base_name.setter
+    def base_name(self, value):
+        if isinstance(value, dict):
+            self._base_name = value
+        else:
+            raise ValueError("'base_name' must be a dict type, not {}".format(type(value)))
+        
+    @property
+    def step(self):
+        return self._step
+    @step.setter
+    def step(self, value):
+        if isinstance(value, int):
+            self._step = value
+        else:
+            raise ValueError("'step' must be an int type, not {}".format(type(value)))
+        
+    @property
+    def converged(self):
+        return self._converged
+    @converged.setter
+    def converged(self, value):
+        if isinstance(value, bool):
+            self._converged = value
+        else:
+            raise ValueError("'converged' must be a boolean type, not {}".format(type(value)))
     
 class _RESP_Settings(object):
     def __init__(self):
@@ -1031,6 +1481,136 @@ class _RESP_Settings(object):
 
         layer_3_weight = float(layer_3_weight)
         self.resp_charge_distribution["layer3"] = layer_3_weight
+
+    @property
+    def keywords(self):
+        return self._keywords
+    @keywords.setter
+    def keywords(self, value):
+        if isinstance(value, dict):
+            self._keywords = value
+        else:
+            raise ValueError("'keywords' must be a dict type, not {}".format(type(value)))
+        
+    @property
+    def additional_keywords(self):
+        return self._additional_keywords
+    @additional_keywords.setter
+    def additional_keywords(self, value):
+        if isinstance(value, dict):
+            self._additional_keywords = value
+        else:
+            raise ValueError("'additional_keywords' must be a dict type, not {}".format(type(value)))
+        
+    @property
+    def iops(self):
+        return self._iops
+    @iops.setter
+    def iops(self, value):
+        if isinstance(value, dict):
+            self._iops = value
+        else:
+            raise ValueError("'iops' must be a dict type, not {}".format(type(value)))
+        
+    @property
+    def additional_print(self):
+        return self._additional_print
+    @additional_print.setter
+    def additional_print(self, value):
+        if isinstance(value, bool):
+            self._additional_print = value
+        else:
+            raise ValueError("'additional_print' must be a boolean type, not {}".format(type(value)))
+        
+    @property
+    def base_name(self):
+        return self._base_name
+    @base_name.setter
+    def base_name(self, value):
+        if isinstance(value, dict):
+            self._base_name = value
+        else:
+            raise ValueError("'base_name' must be a dict type, not {}".format(type(value)))
+        
+    @property
+    def step(self):
+        return self._step
+    @step.setter
+    def step(self, value):
+        if isinstance(value, int):
+            self._step = value
+        else:
+            raise ValueError("'step' must be an int type, not {}".format(type(value)))
+        
+    @property
+    def converged(self):
+        return self._converged
+    @converged.setter
+    def converged(self, value):
+        if isinstance(value, bool):
+            self._converged = value
+        else:
+            raise ValueError("'converged' must be a boolean type, not {}".format(type(value)))
+        
+    @property
+    def use_embed(self):
+        return self._use_embed
+    @use_embed.setter
+    def use_embed(self, value):
+        if isinstance(value, bool):
+            self._use_embed = value
+        else:
+            raise ValueError("'use_embed' must be a boolean type, not {}".format(type(value)))
+            
+    @property
+    def resp_convergence_threshold(self):
+        return self._resp_convergence_threshold
+    @resp_convergence_threshold.setter
+    def resp_convergence_threshold(self, value):
+        if isinstance(value, float):
+            self._resp_convergence_threshold = value
+        else:
+            raise ValueError("'resp_convergence_threshold' must be a float type, not {}".format(type(value)))
+            
+    @property
+    def resp_restraint_strength(self):
+        return self._resp_restraint_strength
+    @resp_restraint_strength.setter
+    def resp_restraint_strength(self, value):
+        if isinstance(value, float):
+            self._resp_restraint_strength = value
+        else:
+            raise ValueError("'resp_restraint_strength' must be a float type, not {}".format(type(value)))
+            
+    @property
+    def resp_restraint_tightness(self):
+        return self._resp_restraint_tightness
+    @resp_restraint_tightness.setter
+    def resp_restraint_tightness(self, value):
+        if isinstance(value, float):
+            self._resp_restraint_tightness = value
+        else:
+            raise ValueError("'resp_restraint_tightness' must be a float type, not {}".format(type(value)))
+            
+    @property
+    def resp_max_iterations(self):
+        return self._resp_max_iterations
+    @resp_max_iterations.setter
+    def resp_max_iterations(self, value):
+        if isinstance(value, float):
+            self._resp_max_iterations = value
+        else:
+            raise ValueError("'resp_max_iterations' must be a float type, not {}".format(type(value)))
+            
+    @property
+    def resp_charge_distribution(self):
+        return self._resp_charge_distribution
+    @resp_charge_distribution.setter
+    def resp_charge_distribution(self, value):
+        if isinstance(value, float):
+            self._resp_charge_distribution = value
+        else:
+            raise ValueError("'resp_charge_distribution' must be a float type, not {}".format(type(value)))
     
 class _Params_Settings(object):
     def __init__(self):
@@ -1066,4 +1646,112 @@ class _Params_Settings(object):
         self.angleKeq  = 100.00
         self.torsionV  = 4.000
         
-    
+    @property
+    def keywords(self):
+        return self._keywords
+    @keywords.setter
+    def keywords(self, value):
+        if isinstance(value, dict):
+            self._keywords = value
+        else:
+            raise ValueError("'keywords' must be a dict type, not {}".format(type(value)))
+        
+    @property
+    def additional_keywords(self):
+        return self._additional_keywords
+    @additional_keywords.setter
+    def additional_keywords(self, value):
+        if isinstance(value, dict):
+            self._additional_keywords = value
+        else:
+            raise ValueError("'additional_keywords' must be a dict type, not {}".format(type(value)))
+        
+    @property
+    def iops(self):
+        return self._iops
+    @iops.setter
+    def iops(self, value):
+        if isinstance(value, dict):
+            self._iops = value
+        else:
+            raise ValueError("'iops' must be a dict type, not {}".format(type(value)))
+        
+    @property
+    def additional_print(self):
+        return self._additional_print
+    @additional_print.setter
+    def additional_print(self, value):
+        if isinstance(value, bool):
+            self._additional_print = value
+        else:
+            raise ValueError("'additional_print' must be a boolean type, not {}".format(type(value)))
+        
+    @property
+    def base_name(self):
+        return self._base_name
+    @base_name.setter
+    def base_name(self, value):
+        if isinstance(value, dict):
+            self._base_name = value
+        else:
+            raise ValueError("'base_name' must be a dict type, not {}".format(type(value)))
+        
+    @property
+    def step(self):
+        return self._step
+    @step.setter
+    def step(self, value):
+        if isinstance(value, int):
+            self._step = value
+        else:
+            raise ValueError("'step' must be an int type, not {}".format(type(value)))
+        
+    @property
+    def link_type_dict(self):
+        return self._link_type_dict
+    @link_type_dict.setter
+    def link_type_dict(self, value):
+        if isinstance(value, dict):
+            self._link_type_dict = value
+        else:
+            raise ValueError("'link_type_dict' must be a dict type, not {}".format(type(value)))
+            
+    @property
+    def nonbon(self):
+        return self._nonbon
+    @nonbon.setter
+    def nonbon(self, value):
+        if isinstance(value, str):
+            self._nonbon = value
+        else:
+            raise ValueError("'nonbon' must be a string type, not {}".format(type(value)))
+            
+    @property
+    def lengthKeq(self):
+        return self._lengthKeq
+    @lengthKeq.setter
+    def lengthKeq(self, value):
+        if isinstance(value, float):
+            self._lengthKeq = value
+        else:
+            raise ValueError("'lengthKeq' must be a float type, not {}".format(type(value)))
+            
+    @property
+    def angleKeq(self):
+        return self._angleKeq
+    @angleKeq.setter
+    def angleKeq(self, value):
+        if isinstance(value, float):
+            self._angleKeq = value
+        else:
+            raise ValueError("'angleKeq' must be a float type, not {}".format(type(value)))
+            
+    @property
+    def torsionV(self):
+        return self._torsionV
+    @torsionV.setter
+    def torsionV(self, value):
+        if isinstance(value, float):
+            self._torsionV = value
+        else:
+            raise ValueError("'torsionV' must be a float type, not {}".format(type(value)))
