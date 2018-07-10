@@ -22,6 +22,10 @@ Created on Tue Jul 10 11:10:39 2018
 """
 
 class Parameters(object):
+    """
+    The Parameters object is a class to organise the different types of 
+    parameters used in an Amber calculation.
+    """
     def __init__(self, VdWs = None, stretches = None, bends = None, torsions = None, improper_torsions = None):
         self.VdWs = VdWs
         self.stretches = stretches
@@ -30,6 +34,11 @@ class Parameters(object):
         self.improper_torsions = improper_torsions
         
     def update_parameters(self, other_params, replace = True):
+        """
+        Update this Parameter object with a new one.
+        With replace=True, parameters with the same type will be replaced
+        With replace=False, parameters with the same type will be ignored
+        """
         for other_VdW in other_params.VdWs:
             self.update_VdW(other_VdW, replace)
             
@@ -46,6 +55,11 @@ class Parameters(object):
             self.update_improper_torsion(other_improper_torsion, replace)
         
     def update_VdW(self, other_VdW, replace = True):
+        """
+        Update or add a VdW parameter.
+        With replace=True, parameters with the same type will be replaced
+        With replace=False, parameters with the same type will be ignored
+        """
         for i, VdW in enumerate(self.VdWs):
             if VdW.type_equivalent(other_VdW):
                 if replace:
@@ -54,6 +68,11 @@ class Parameters(object):
         self.VdWs.append(other_VdW)
         
     def update_stretch(self, other_stretch, replace = True):
+        """
+        Update or add a Stretch parameter.
+        With replace=True, parameters with the same type will be replaced
+        With replace=False, parameters with the same type will be ignored
+        """
         for i, stretch in enumerate(self.stretches):
             if stretch.type_equivalent(other_stretch)[0]:
                 if replace:
@@ -62,6 +81,11 @@ class Parameters(object):
         self.stretches.append(other_stretch)
         
     def update_bend(self, other_bend, replace = True):
+        """
+        Update or add a Bend parameter.
+        With replace=True, parameters with the same type will be replaced
+        With replace=False, parameters with the same type will be ignored
+        """
         for i, bend in enumerate(self.bends):
             if bend.type_equivalent(other_bend)[0]:
                 if replace:
@@ -70,6 +94,11 @@ class Parameters(object):
         self.bends.append(other_bend)
         
     def update_torsion(self, other_torsion, replace = True):
+        """
+        Update or add a Torsion parameter.
+        With replace=True, parameters with the same type will be replaced
+        With replace=False, parameters with the same type will be ignored
+        """
         for i, torsion in enumerate(self.torsions):
             if torsion.type_equivalent(other_torsion)[0]:
                 if replace:
@@ -78,6 +107,11 @@ class Parameters(object):
         self.torsions.append(other_torsion)
         
     def update_improper_torsion(self, other_improper_torsion, replace = True):
+        """
+        Update or add an Improper Torsion parameter.
+        With replace=True, parameters with the same type will be replaced
+        With replace=False, parameters with the same type will be ignored
+        """
         for i, improper_torsion in enumerate(self.improper_torsions):
             if improper_torsion.type_equivalent(other_improper_torsion)[0]:
                 if replace:
@@ -146,6 +180,9 @@ class Parameters(object):
             raise ValueError("'improper_torsions' must be a list of ImproperTorsionParam objects")
             
     def get_string(self):
+        """
+        Write all parameters in a Gaussian-readable string.
+        """
         string = self.nonbon_string + "\n"
         for param in self.VdWs + self.stretches + self.bends + self.torsions + self.improper_torsions:
             string += param.get_string() + "\n"
@@ -162,6 +199,12 @@ class Parameters(object):
         )
     
 class VdWParam(object):
+    """
+    Van der Waal Parameter for Amber calcutions
+    type0: Amber type of Atom
+    radius: Atomic radius
+    potential: Potential well depth
+    """
     def __init__(self, type0, radius, potential):
         self.type0 = type0
         self.radius = radius
@@ -172,6 +215,9 @@ class VdWParam(object):
         self._v_f = "{:7.4f}"
     
     def get_string(self):
+        """
+        Write this parameter in a Gaussian-readable string.
+        """
         return " ".join([
             self._header,
             self._type0_f.format(self.type0),
@@ -232,6 +278,13 @@ class VdWParam(object):
         )
     
 class StretchParam(object):
+    """
+    Stretching Parameter for Amber calcutions
+    type0: Amber type of Atom 0
+    type1: Amber type of Atom 1
+    k: Force constant
+    r: Equilibrium distance
+    """
     def __init__(self, type0, type1, k, r):
         self.type0 = type0
         self.type1 = type1
@@ -244,6 +297,9 @@ class StretchParam(object):
         self._r_f = "{:7.4f}"
     
     def get_string(self):
+        """
+        Write this parameter in a Gaussian-readable string.
+        """
         return " ".join([
             self._header,
             self._type0_f.format(self.type0),
@@ -331,6 +387,14 @@ class StretchParam(object):
         )
     
 class BendParam(object):
+    """
+    Bending Parameter for Amber calcutions
+    type0: Amber type of Atom 0
+    type1: Amber type of Atom 1
+    type2: Amber type of Atom 2
+    k: Force constant
+    angle: Equilibrium angle
+    """
     def __init__(self, type0, type1, type2, k, angle):
         self.type0 = type0
         self.type1 = type1
@@ -345,6 +409,9 @@ class BendParam(object):
         self._angle_f = "{:7.4f}"
     
     def get_string(self):
+        """
+        Write this parameter in a Gaussian-readable string.
+        """
         return " ".join([
             self._header,
             self._type0_f.format(self.type0),
@@ -442,6 +509,13 @@ class BendParam(object):
         )
     
 class TorsionParam(object):
+    """
+    Torsion Parameter for Amber calcutions
+    type[0-4]: Amber type of Atom 0-4
+    v[0-4]: barrier for cosine multiplicity 1-5
+    gamma[0-4]: phase offset for cosine periodicity 1-5
+    n_paths: Number of paths
+    """
     def __init__(
             self, 
             type0, 
@@ -489,6 +563,9 @@ class TorsionParam(object):
         self._n_paths_f = "{:3.1f}"
     
     def get_string(self):
+        """
+        Write this parameter in a Gaussian-readable string.
+        """
         return " ".join([
             self._header,
             self._type0_f.format(self.type0 if self.type0 != 'X' else '*'),
@@ -674,6 +751,13 @@ class TorsionParam(object):
         )
     
 class ImproperTorsionParam(object):
+    """
+    Improper Torsion Parameter for Amber calcutions
+    type[0-4]: Amber type of Atom 0-4
+    v: barrier 
+    gamma: phase offset
+    nt: Cosine periodicity
+    """
     def __init__(
             self, 
             type0, 
@@ -703,6 +787,9 @@ class ImproperTorsionParam(object):
         self._nt_f = "{:3.1f}"
     
     def get_string(self):
+        """
+        Write this parameter in a Gaussian-readable string.
+        """
         return " ".join([
             self._header,
             self._type0_f.format(self.type0 if self.type0 != 'X' else '*'),

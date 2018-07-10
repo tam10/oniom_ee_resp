@@ -48,7 +48,6 @@ class ONIOM_Optimiser():
             raise RuntimeError("atoms must be a Protein Extensions Atoms instance")
         self.initial_atoms = self.atoms = atoms
         self.size = len(atoms)
-        self._neighbours = atoms.connectivity
         
         self.params = Parameters()
 
@@ -75,11 +74,11 @@ class ONIOM_Optimiser():
         self.params = self.initial_params = params
         
     def _initialise_log(self):
-        with open(self._home + "/" + self.settings.global_settings.log_fn, "w") as log_obj:
+        with open(self.settings.global_settings.home + "/" + self.settings.global_settings.log_fn, "w") as log_obj:
             log_obj.write("{}: {}\n".format(time.ctime(), "Initialised"))
 
     def log(self, message):
-        with open(self._home + "/" + self.settings.global_settings.log_fn, "a") as log_obj:
+        with open(self.settings.global_settings.home + "/" + self.settings.global_settings.log_fn, "a") as log_obj:
             log_obj.write("{}: {}\n".format(time.ctime(), message))
 
     def copy_from_node(self, fn, destination):
@@ -337,16 +336,16 @@ class ONIOM_Optimiser():
     def get_missing_parameters(self, copy_com = False, copy_log = False, copy_chk = False):
         
         global_settings = self.settings.global_settings
-        param_settings = self.settings.param_settings
+        params_settings = self.settings.params_settings
         
-        base_fn = "{:s}_{:d}".format(param_settings.base_name, param_settings.step)
-        title = "Parameter determination step {:d}".format(param_settings.step)
+        base_fn = "{:s}_{:d}".format(params_settings.base_name, params_settings.step)
+        title = "Parameter determination step {:d}".format(params_settings.step)
         
-        keywords = param_settings.keywords.copy()
+        keywords = params_settings.keywords.copy()
         keywords.update(global_settings.additional_keywords)
-        keywords.update(param_settings.additional_keywords)
+        keywords.update(params_settings.additional_keywords)
         
-        iops = param_settings.iops.copy()
+        iops = params_settings.iops.copy()
         
         write_connectivity = "connectivity" in keywords["geom"]
         
@@ -357,12 +356,12 @@ class ONIOM_Optimiser():
         self._run_gauss(base_fn, copy_com, copy_log, copy_chk)
         self._update_params_from_log(base_fn)
         
-        param_settings.step += 1
+        params_settings.step += 1
         
     def irc_optimise(self, copy_com = False, copy_log = False, copy_chk = False):
         
         global_settings = self.settings.global_settings
-        irc_settings = self.settings.param_settings
+        irc_settings = self.settings.params_settings
 
         base_fn = "{:s}_{:d}".format(irc_settings.base_name, irc_settings.step)
         title = "IRC Optimisation {:d}".format(irc_settings.step)
@@ -416,10 +415,10 @@ class ONIOM_Optimiser():
         if not self.charges or not self.multiplicities:
             raise Exception("Charges and/or multiplicities not set")
 
-        if not self.high_method:
+        if not self.settings.global_settings.high_method:
             raise Exception("High method not set")
 
-        if not self.low_method:
+        if not self.settings.global_settings.low_method:
             raise Exception("Low method not set")
 
         self._get_atom_info_strings()
@@ -452,7 +451,7 @@ class ONIOM_Optimiser():
         self.model_indices = model_indices = self.initial_model_indices
 
         neighbours = self.atoms.expand_selection_by_bonds(model_indices, include_current_selection = False)
-        h_neighbours  = [n for n in neighbours if self.atoms[n].symbol == "H"]
+        h_neighbours  = [n for n in neighbours if self.atoms[n].element == "H"]
         links = [n for n in neighbours if n not in h_neighbours]
 
         for link_index in links:
@@ -463,7 +462,7 @@ class ONIOM_Optimiser():
             if not len(layer1) == 1:
                 raise Exception("Link atom {} has wrong number of model region neighbours: {} ({})".format(link_index, len(layer1), layer1))
             
-            link_type = self.link_type_dict[self.atoms[layer1[0]].element]
+            link_type = self.settings.params_settings.link_type_dict[self.atoms[layer1[0]].element]
             if type(link_type) == dict:
                 try:
                     link_type = link_type[self.atoms[layer1[0]].amber_type]
@@ -478,6 +477,12 @@ class ONIOM_Optimiser():
             
 
             self.links[link_index] = {"type": link_type, "layer1": layer1, "layer2": layer2, "layer3": layer3}
+
+    def set_high_method(self, method, basis=''):
+        self.settings.global_settings.set_high_method(method, basis)
+
+    def set_low_method(self, method, basis=''):
+        self.settings.global_settings.set_low_method(method, basis)
         
     def _get_low_method_keyword(self):
         low_method_keyword = "{}{}".format(
@@ -605,7 +610,7 @@ class ONIOM_Optimiser():
             self._atom_info_strings.append([s0 + f1 + s2, f3 + s4])
             
             s = " {:d}".format(i + 1)
-            ns = self.atoms._neighbours[i]
+            ns = self.atoms.connectivity[i]
             
             for n in ns:
                 s += " {:d} 1.0".format(n + 1)
