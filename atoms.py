@@ -38,9 +38,28 @@ class Atoms(object):
                 residue_names = None,
                 residue_numbers = None,
                 layers = None,
-                links = None,
-                connectivity = None
+                connectivity = None,
+                links = None
             ):
+        """
+    Assemble and Atoms object using a list of Atom objects or lists/arrays.
+    Using lists or arrays, positions and elements are essential.
+    
+    partial_charges: Charges used to write Gaussian input files
+    esp_charges:     ESP derived charges read from a Gaussian output file.
+    resp_charges:    RESP derived charges calculated from a RESP_Optimiser
+    tags:            Integers used for tagging atoms 
+                        (useful for differentiating atoms)
+    pdb_types:       PDB atom identifier
+    amber_types:     Amber atom identifier
+    residue_names:   PDB residue name
+    residue_numbers: PDB residue number
+    layers:          List of strings representing ONIOM Layer.
+                        Must be one of ["H", "M", "L"]
+    connectivity:    Reciprocal list of neighbours by index
+    links:           A subset of connectivity 
+                        Only link connections are included
+        """
         
         self._positions = np.array([])
         self.elements = np.array([])
@@ -258,20 +277,23 @@ class Atoms(object):
         return self._links
     @links.setter
     def links(self, value):
-        self._links = value
         if value is None:
-            self._links = np.array([False] * self.size, dtype = "bool")
+            self._links = [[] * self.size]
         elif not len(value) == self.size:
             raise ValueError("Wrong size of 'links' ({}) for atoms ({})".format(len(value), self.size))
         else:
-            self._links = np.array(value, dtype = "bool")
+            size = self.size
+            for index, neighbours in enumerate(value):
+                for neighbour in neighbours:
+                    if not neighbour >=0 and neighbour < size:
+                        raise IndexError("Neighbour atom {} of atom {} is out of range of atoms ({})".format(neighbour, index, size))
+            self._links = value
         
     @property
     def connectivity(self):
         return self._connectivity
     @connectivity.setter
     def connectivity(self, value):
-        self._connectivity = value
         if value is None:
             self._connectivity = [[] * self.size]
         elif not len(value) == self.size:
@@ -286,6 +308,9 @@ class Atoms(object):
         
     @property
     def formula(self):
+        """
+        Hill system of ordering elements.
+        """
         def e_count(e_list, e):
             count = e_list.count(e)
             return e + (str(count) if count > 1 else '') if count > 0 else ''
@@ -355,7 +380,13 @@ class Atoms(object):
         return np.degrees(a)
         
     def expand_selection_by_bonds(self, current_selection, expand_by = 1, include_current_selection = True, exclude = None):
+        """
+        Starting with a list of atomic indices, expand the list using the connectivity.
         
+        expand_by:                  Number of bonds to grow selection by.
+        include_current_selection:  Include the current_selection list in the output.
+        exclude:                    Remove these indices at every step.
+        """
         exclude = [] if exclude is None else exclude
 
         connectivity = self.connectivity
@@ -380,6 +411,10 @@ class Atoms(object):
         return self.size
         
     def __getitem__(self, i):
+        """
+        Returns a new Atom object for an integer input.
+        Returns a new Atoms object for a list or a slice.
+        """
         if isinstance(i, int):
             if i < -self.size or i > self.size:
                 raise IndexError("Index out of range")
@@ -387,6 +422,7 @@ class Atoms(object):
             atom = Atom(
                 element  = self.elements[i],
                 position = self.positions[i],
+                partial_charge = self.partial_charges[i],
                 esp_charge = self.esp_charges[i],
                 resp_charge = self.resp_charges[i],
                 index = i,
@@ -411,7 +447,23 @@ class Atoms(object):
         return repr_str
         
 class Atom(object):
+    """
+    The Atom object contains the following properties:
+        
+    partial_charge:  Charge used to write Gaussian input files
+    esp_charge:      ESP derived charge read from a Gaussian output file.
+    resp_charge:     RESP derived charge calculated from a RESP_Optimiser
+    tag:             Integer used for tagging
+                         (useful for differentiating atoms)
+    pdb_type:        PDB atom identifier
+    amber_type:      Amber atom identifier
+    residue_name:    PDB residue name
+    residue_number:  PDB residue number
+    layer:           String representing ONIOM Layer.
+                         Must be one of ["H", "M", "L"]
+    """
     
+    #Prevent the wrong strings being used for layers
     _allowed_layer_names = ["H", "M", "L"]
 
     def __init__(
@@ -546,6 +598,30 @@ class Atom(object):
         if not value in self._allowed_layer_names:
             raise ValueError("'layer' must be one of: {}, not {}".format(self._allowed_layer_names, value))
         self._layer = str(value)
+        
+    def __repr__(self):
+        strings = ["Atom("]
+        names = [
+            "element",
+            "position",
+            "partial_charge",
+            "esp_charge",
+            "resp_charge",
+            "index",
+            "tag",
+            "pdb_type",
+            "amber_type",
+            "residue_name",
+            "residue_number",
+            "layer"
+        ]
+        
+        for name in names:
+            strings.append("{}={},".format(name, getattr(self, name)))
+        
+        strings.append(")")
+            
+        return " ".join(strings)
         
 class ComReader(object):
     def __init__(self, filename):
@@ -732,6 +808,7 @@ class ComReader(object):
             amber_types = ambers,
             pdb_types = pdbs,
             partial_charges = amber_charges,
+            esp_charges = amber_charges,
             residue_names = residues,
             residue_numbers = resnums,
             positions = positions,
@@ -752,8 +829,7 @@ class ComReader(object):
             sa = a.split()
     
             if blanks == 2:
-                self.atoms.connectivity = neighbours
-                return
+                break
             elif a == "":
                 blanks += 1
             elif sa[0].isdigit():
@@ -762,11 +838,13 @@ class ComReader(object):
 
                 ns = [int(connections[2*cn]) - 1 for cn in range(int(len(connections) / 2))]
 
-                neighbours[index] += ns
-
                 for n in ns:
-                    neighbours[n] += [index]
+                    if not n in neighbours[index]:
+                        neighbours[index] += [n]
+                    if not index in neighbours[n]:
+                        neighbours[n] += [index]
 
+        self.atoms.connectivity = neighbours
 
 def read_com(fn):
     com_reader = ComReader(fn)

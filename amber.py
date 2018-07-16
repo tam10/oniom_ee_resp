@@ -178,6 +178,18 @@ class Parameters(object):
             self._improper_torsions = list(value)
         else:
             raise ValueError("'improper_torsions' must be a list of ImproperTorsionParam objects")
+
+    @property
+    def nonbon_string(self):
+        return self._nonbon_string
+    @nonbon_string.setter
+    def nonbon_string(self, value):
+        if value is None:
+            self._nonbon_string = ""
+        elif isinstance(value, str):
+            self._nonbon_string = value
+        else:
+            raise ValueError("'nonbon_string' must be a string, not {}".format(type(value)))
             
     def get_string(self):
         """

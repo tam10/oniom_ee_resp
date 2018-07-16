@@ -176,7 +176,6 @@ class RESP_Optimiser(object):
         self._total_charge = float(total_charge)
             
     def from_log(self, log_path):
-        
         with open(log_path, "r") as log_obj:
             lines = log_obj.readlines()
             
@@ -242,10 +241,11 @@ class RESP_Optimiser(object):
         self.qm_esps             = np.array(qm_esps            )
         
         self.model_indices = []
-       
-
         
     def to_resp_file(self, filename, atoms):
+        """
+        Write a .resp file that 
+        """
         
         def get_model_neighbours(neighbours, index, model_dict):
             model_neighbours = []

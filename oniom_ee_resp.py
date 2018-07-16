@@ -34,6 +34,11 @@ import traceback as tb
 import os
 
 class ONIOM_Optimiser():
+    """
+    An ONIOM optimisation wrapper around Gaussian that allows the restraining of partial charges in the model region.
+    
+    Settings are stored in the settings child object.
+    """
     def __init__(self, atoms): 
         
         self.settings = _ONIOM_Settings()
@@ -52,6 +57,9 @@ class ONIOM_Optimiser():
         self.params = Parameters()
 
     def set_model_region(self, model_indices):
+        """
+        Define the model region by a list of atomic indices, where the first atomic index is 0.
+        """
 
         if type(model_indices) != list:
             raise RuntimeError("model_indices must be a list")
@@ -62,8 +70,27 @@ class ONIOM_Optimiser():
 
         #Have to update this if model region changed
         self._get_atom_info_strings()
+
+    def set_charges(self, charges):
+
+        if not hasattr(charges, "__len__"):
+            raise TypeError("'charges' must be a list of integers")
+        if not all([isinstance(charge, int) for charge in charges]):
+            raise TypeError("'charges' must be a list of integers")
+        self.settings.global_settings.charges = charges
+
+    def set_multiplicities(self, multiplicities):
+
+        if not hasattr(multiplicities, "__len__"):
+            raise TypeError("'multiplicities' must be a list of integers")
+        if not all([isinstance(multiplicity, int) for multiplicity in multiplicities]):
+            raise TypeError("'multiplicities' must be a list of integers")
+        self.settings.global_settings.multiplicities = multiplicities
      
     def set_params(self, params):
+        """
+        Attach a new Parameters object.
+        """
         
         if not self.links:
             raise RuntimeError("Model region not set")
@@ -74,14 +101,23 @@ class ONIOM_Optimiser():
         self.params = self.initial_params = params
         
     def _initialise_log(self):
+        """
+        Clears the log and writes the initial string and time.
+        """
         with open(self.settings.global_settings.home + "/" + self.settings.global_settings.log_fn, "w") as log_obj:
             log_obj.write("{}: {}\n".format(time.ctime(), "Initialised"))
 
     def log(self, message):
+        """
+        Write a message to the log file.
+        """
         with open(self.settings.global_settings.home + "/" + self.settings.global_settings.log_fn, "a") as log_obj:
             log_obj.write("{}: {}\n".format(time.ctime(), message))
 
     def copy_from_node(self, fn, destination):
+        """
+        Copy a file from the working node that this is running in.
+        """
         try:
             shutil.copy(fn, destination)
             self.log("Copied {} to {}/{}".format(fn, destination, fn))
@@ -89,6 +125,9 @@ class ONIOM_Optimiser():
             self.log("Failed to copy {} to {}/{}\n{}".format(fn, destination, fn, tb.format_exc()))
             
     def copy_to_node(self, fn):
+        """
+        Copy a file to the working node that this is running in.
+        """
         try:
             shutil.copy(fn, "./")
             self.log("Copied {} to node".format(fn))
@@ -96,7 +135,10 @@ class ONIOM_Optimiser():
             self.log("Failed to copy {} to node\n{}".format(fn, tb.format_exc()))
         
     def _run_gauss(self, base_fn, copy_com = False, copy_log = False, copy_chk = False):
-       
+        """
+        Run Gaussian using the gaussian_run_command in settings.global_settings.
+        Optionally copy the com, log and/or chk file.
+        """
         global_settings = self.settings.global_settings
         
         if copy_com:
@@ -115,6 +157,12 @@ class ONIOM_Optimiser():
             self.copy_from_node(base_fn + ".chk", global_settings.work)
             
     def update_resps_from_log(self, log_fn, write_resp_file=False):
+        """
+        Does the following tasks from a log file containing ESP points:
+        Calculates Restrained ESP derived charges.
+        Redistributes RESP charges away from link atoms to prevent overpolarisations
+        Optionally write a .resp file with information about positions and charges
+        """
         
         global_settings = self.settings.global_settings
         resp_settings = self.settings.resp_settings
@@ -139,12 +187,12 @@ class ONIOM_Optimiser():
 
         #Apply RESP charges
         for j in models_and_links:
-            self.atoms[j].partial_charge = resp_charges[j]
-            self.atoms[j].resp_charge = resp_charges[j]
-            self.atoms[j].esp_charge = esp_charges[j]
+            self.atoms.partial_charges[j] = resp_charges[j]
+            self.atoms.resp_charges[j] = resp_charges[j]
+            self.atoms.esp_charges[j] = esp_charges[j]
 
         #Apply link atom restraints
-        link_rcd   = resp_settings.resp_charge_distribution["layer1"]
+        link_rcd   = resp_settings.resp_charge_distribution["link"]
         layer1_rcd = resp_settings.resp_charge_distribution["layer1"]
         layer2_rcd = resp_settings.resp_charge_distribution["layer2"]
         layer3_rcd = resp_settings.resp_charge_distribution["layer3"]
@@ -157,9 +205,9 @@ class ONIOM_Optimiser():
             layer2 = link["layer2"]
             layer3 = link["layer3"]
 
-            layer1_size = len(layer1)
-            layer2_size = len(layer2)
-            layer3_size = len(layer3)
+            layer1_size = max(1, len(layer1))
+            layer2_size = max(1, len(layer2))
+            layer3_size = max(1, len(layer3))
 
             layer1_charge_per_atom = link_charge * layer1_rcd / float(layer1_size)
             layer2_charge_per_atom = link_charge * layer2_rcd / float(layer2_size)
@@ -207,6 +255,9 @@ class ONIOM_Optimiser():
             self.resp_opt.to_resp_file(log_fn + ".resp", self.atoms)
             
     def _update_geometry_from_log(self, log_fn):
+        """
+        Update the positions of self.atoms with geometry in a log file.
+        """
         with open(log_fn + ".log", "r") as log_obj:
             log_str = log_obj.read()
             
@@ -219,15 +270,17 @@ class ONIOM_Optimiser():
         self.atoms.positions = np.array(positions)
         
     def write_com(self, base_fn, keywords_string, title, oldchk_fn = "", write_connectivity = True, write_params = True):
-        
+        """
+        Write a Gaussian input (com) file.
+        """
         global_settings = self.settings.global_settings
         
         with open(base_fn + ".com", "w") as com_obj:
             com_obj.write("%mem={:d}MB\n".format(global_settings.mem_mb))
             com_obj.write("%nprocshared={:d}\n".format(global_settings.ncpus))
             com_obj.write("%chk={:s}.chk\n".format(base_fn))
-            if global_settings.last_calc:
-                com_obj.write("%oldchk={:s}.chk\n".format(global_settings.last_calc))
+            if oldchk_fn:
+                com_obj.write("%oldchk={:s}.chk\n".format(oldchk_fn))
             
             com_obj.write("{}\n\n".format(keywords_string))
             com_obj.write("{}\n\n".format(title))
@@ -239,11 +292,15 @@ class ONIOM_Optimiser():
                 com_obj.write("\n".join(self._connectivity_strings) + "\n\n\n")
                 
             if write_params:
-                com_obj.write(self._get_params_string() + "\n")
+                com_obj.write(self.params.get_string() + "\n")
         
         
-    def get_resp(self, copy_com = False, copy_log = False, copy_chk = False, copy_resp = False):
-        
+    def calculate_oniom_resp_charges(self, copy_com = False, copy_log = False, copy_chk = False, copy_resp = False):
+        """
+        Run a single-point energy using the resp_settings.
+        Compute RESP-derived charges using a RESP_Optimiser
+        Update model region charges using update_resps_from_log
+        """
         global_settings = self.settings.global_settings
         resp_settings = self.settings.resp_settings
         
@@ -260,33 +317,35 @@ class ONIOM_Optimiser():
         
         iops = resp_settings.iops.copy()
         
-        keywords_string = self._get_keywords_string(keywords, iops, embed = resp_settings.use_embed)
-        oldchk_fn = "%oldchk={:s}.chk\n".format(global_settings.last_calc) if global_settings.last_calc else ""
+        keywords_string = self._get_keywords_string(keywords, iops, embed = resp_settings.use_embed, additional_print = resp_settings.additional_print)
+        oldchk_fn = global_settings.last_calc if global_settings.last_calc else ""
         
         self.write_com(base_fn, keywords_string, title, oldchk_fn, write_connectivity)
         
         self._run_gauss(base_fn, copy_com, copy_log, copy_chk)
         self.update_resps_from_log(base_fn, copy_resp)
         if copy_resp:
-            self.copy_from_node(base_fn + ".resp", self._work)
+            self.copy_from_node(base_fn + ".resp", self.work)
         
         resp_settings.step += 1
         global_settings._last_calc = base_fn
     
     def optimise(self, copy_com = False, copy_log = False, copy_chk = False):
-        
+        """
+        Run one or more Gaussian optimisation steps using the opt_settings.
+        """
         global_settings = self.settings.global_settings
         opt_settings = self.settings.opt_settings
         
-        base_fn = "{:s}_{:d}".format(opt_settings.base_name, opt_settings.step)
+        base_fn = "{:s}{:s}{:d}".format(global_settings.base_name_prefix, opt_settings.base_name, opt_settings.step)
         title = "Optimisation {:d}".format(opt_settings.step)
         
         keywords = opt_settings.keywords.copy()
-        if not "opt" in keywords:
-            keywords["opt"] = dict()
-            
         keywords.update(global_settings.additional_keywords)
         keywords.update(opt_settings.additional_keywords)
+        
+        if keywords.get("opt") is None:
+            keywords["opt"] = dict()
         keywords["opt"]["maxcycles"] = opt_settings.max_steps
 
         recompute_hessian = False
@@ -318,8 +377,8 @@ class ONIOM_Optimiser():
             }
         })
         
-        keywords_string = self._get_keywords_string(keywords, iops)
-        oldchk_fn = "" if recompute_hessian else "%oldchk={:s}_{:d}.chk\n".format(opt_settings.base_name, opt_settings.step - 1)
+        keywords_string = self._get_keywords_string(keywords, iops, additional_print = opt_settings.additional_print)
+        oldchk_fn = "" if recompute_hessian else "{:s}_{:d}".format(opt_settings.base_name, opt_settings.step - 1)
         
         self.write_com(base_fn, keywords_string, title, oldchk_fn, write_connectivity)
             
@@ -335,11 +394,14 @@ class ONIOM_Optimiser():
         global_settings._last_calc = base_fn
 
     def get_missing_parameters(self, copy_com = False, copy_log = False, copy_chk = False):
-        
+        """
+        Run a single-point calculation using the params_settings.
+        Use the output to determine what parameters are missing.
+        """
         global_settings = self.settings.global_settings
         params_settings = self.settings.params_settings
         
-        base_fn = "{:s}_{:d}".format(params_settings.base_name, params_settings.step)
+        base_fn = "{:s}{:s}{:d}".format(global_settings.base_name_prefix, params_settings.base_name, params_settings.step)
         title = "Parameter determination step {:d}".format(params_settings.step)
         
         keywords = params_settings.keywords.copy()
@@ -350,7 +412,14 @@ class ONIOM_Optimiser():
         
         write_connectivity = "connectivity" in keywords["geom"]
         
-        keywords_string = self._get_keywords_string(keywords, iops, oniom=False, low_method=True)
+        keywords_string = self._get_keywords_string(
+            keywords, 
+            iops, 
+            oniom=False, 
+            low_method=True, 
+            additional_print = params_settings.additional_print, 
+            use_soft = True
+        )
         
         self.write_com(base_fn, keywords_string, title, "", write_connectivity, False)
             
@@ -358,14 +427,15 @@ class ONIOM_Optimiser():
         self._update_params_from_log(base_fn)
         
         params_settings.step += 1
-        global_settings._last_calc = base_fn
         
     def irc_optimise(self, copy_com = False, copy_log = False, copy_chk = False):
-        
+        """
+        Run one or more IRC steps using the IRC settings.
+        """
         global_settings = self.settings.global_settings
         irc_settings = self.settings.params_settings
 
-        base_fn = "{:s}_{:d}".format(irc_settings.base_name, irc_settings.step)
+        base_fn = "{:s}{:s}{:d}".format(global_settings.base_name_prefix, irc_settings.base_name, irc_settings.step)
         title = "IRC Optimisation {:d}".format(irc_settings.step)
 
         keywords = irc_settings.keywords.copy()
@@ -391,8 +461,8 @@ class ONIOM_Optimiser():
         
         write_connectivity = "connectivity" in keywords["geom"]
         
-        keywords_string = self._get_keywords_string(keywords, iops)
-        oldchk_fn = "%oldchk={:s}_{:d}.chk\n".format(irc_settings.base_name, irc_settings.step - 1) if irc_settings.step > 0 else ""
+        keywords_string = self._get_keywords_string(keywords, iops, additional_print = irc_settings.additional_print)
+        oldchk_fn = "{:s}_{:d}".format(irc_settings.base_name, irc_settings.step - 1) if irc_settings.step > 0 else ""
         
         self.write_com(base_fn, keywords_string, title, oldchk_fn, write_connectivity)
             
@@ -409,44 +479,49 @@ class ONIOM_Optimiser():
         global_settings._last_calc = base_fn
 
     def initialise(self):
+        """
+        Checks various settings before running.
+        Also populates the atom_info_strings needed for writing input files.
+        """
+        global_settings = self.settings.global_settings
     
         sum_charge_distribution = sum([v for k,v in self.settings.resp_settings.resp_charge_distribution.items()])
 
         if not np.abs(sum_charge_distribution - 1) < 0.0001:
             self.log("WARNING: Sum of charge distribution is not 1. Partial charge will not be conserved")
 
-        if not self.charges or not self.multiplicities:
+        if not global_settings.charges or not global_settings.multiplicities:
             raise Exception("Charges and/or multiplicities not set")
 
-        if not self.settings.global_settings.high_method:
+        if not global_settings.high_method:
             raise Exception("High method not set")
 
-        if not self.settings.global_settings.low_method:
+        if not global_settings.low_method:
             raise Exception("Low method not set")
 
         self._get_atom_info_strings()
     
     def run(self, copy_com = False, copy_log = False, copy_chk = False, copy_resp = False):
-        
+        """
+        Run the Gaussian optimiser and RESP optimiser.
+        """
         self.initialise()
 
         if self.settings.global_settings.irc_mode == True:
             for step_num in range(self.settings.global_settings.max_overall_steps):
-                self.get_resp(copy_com, copy_log, copy_chk, copy_resp)
+                self.calculate_oniom_resp_charges(copy_com, copy_log, copy_chk, copy_resp)
                 self.irc_optimise(copy_com, copy_log, copy_chk)
         else:
             for step_num in range(self.settings.global_settings.max_overall_steps):
-                self.get_resp(copy_com, copy_log, copy_chk, copy_resp)
+                self.calculate_oniom_resp_charges(copy_com, copy_log, copy_chk, copy_resp)
                 self.optimise(copy_com, copy_log, copy_chk)
         
     def get_model_region(self):
-        #Get the model region indices depending on whether:
-        #    the initial indices were tags (in the case selection from non-protonated protein)
-        #    the initial indices are the real indices
-        #
-        #Expand selection to include any neighbouring hydrogens and link atoms
-        #Determine types of link atoms
-        
+        """
+        Get the model region indices:
+        Expand selection to include any neighbouring hydrogens and link atoms
+        Determine types of link atoms
+        """
         if not self.initial_model_indices:
             raise Exception("Model indices are not set")
             
@@ -460,7 +535,7 @@ class ONIOM_Optimiser():
         for link_index in links:
         
             #Get atoms in the model region that neighbour the link atoms for RESP
-            layer1 = self.atoms.expand_selection_by_bonds([link_index], include_current_selection = False)
+            layer1 = self.atoms.expand_selection_by_bonds([link_index], expand_by = 1, include_current_selection = False)
             layer1 = [n for n in layer1 if n in model_indices]
             if not len(layer1) == 1:
                 raise Exception("Link atom {} has wrong number of model region neighbours: {} ({})".format(link_index, len(layer1), layer1))
@@ -472,10 +547,10 @@ class ONIOM_Optimiser():
                 except:
                     link_type = link_type["*"]
 
-            layer2 = self.atoms.expand_selection_by_bonds([link_index], include_current_selection = False)
+            layer2 = self.atoms.expand_selection_by_bonds([link_index], expand_by = 2, include_current_selection = False)
             layer2 = [n for n in layer2 if n in model_indices and n not in layer1]
             
-            layer3 = self.atoms.expand_selection_by_bonds([link_index], include_current_selection = False)
+            layer3 = self.atoms.expand_selection_by_bonds([link_index], expand_by = 3, include_current_selection = False)
             layer3 = [n for n in layer3 if n in model_indices and n not in layer1 and n not in layer2]
             
 
@@ -487,59 +562,95 @@ class ONIOM_Optimiser():
     def set_low_method(self, method, basis=''):
         self.settings.global_settings.set_low_method(method, basis)
         
-    def _get_low_method_keyword(self):
+    def _get_low_method_keyword(self, use_soft=False):
+        """
+        Returns the string used for the low method in ONIOM.
+        use_soft: If using Amber, force the use of softfirst.
+        """
+        low_string = self.settings.global_settings.low_method
+
+        if use_soft:
+            if "amber" in low_string:
+                low_string = "amber=softfirst"
+
         low_method_keyword = "{}{}".format(
-            self.settings.global_settings.low_method,
+            low_string,
             "/{}".format(self.settings.global_settings.low_basis) if self.settings.global_settings.low_basis else ""
         )
         return low_method_keyword
         
     def _get_high_method_keyword(self):
+        """
+        Returns the string used for the high method in ONIOM.
+        """
         high_method_keyword = "{}{}".format(
             self.settings.global_settings.high_method,
             "/{}".format(self.settings.global_settings.high_basis) if self.settings.global_settings.high_basis else ""
         )
         return high_method_keyword
             
-    def _get_oniom_keyword(self, embed=False):
+    def _get_oniom_keyword(self, embed=False, use_soft=False):
+        """
+        Returns the string used for ONIOM.
+        embed: Switch on electrostatic embedding.
+        use_soft: If using Amber, force the use of softfirst.
+        """
+        high_string = self._get_high_method_keyword()
+        low_string  = self._get_low_method_keyword()
+
+        if use_soft:
+            if "amber" in low_string:
+                low_string = "amber=softfirst"
+
         oniom_str = "oniom({}:{}){}".format(
-            self._get_high_method_keyword(),
-            self._get_low_method_keyword(),
+            high_string,
+            low_string,
             "=embed" if embed else ""
         )
         return oniom_str
         
     def _get_iop_string(self, iops):
+        """
+        Return a string of iops used in Gaussian from a dictionary.
+        """
         strings = []
         for overlay, options in iops.items():
             for option, value in options.items():
                 strings.append("{:d}/{:d}={:d}".format(overlay, option, value))
-        return "iop({})".format(",".join(strings))
+        if strings:
+            return "\niop({})".format(",".join(strings))
+        else:
+            return ""
         
-    def _get_keywords_string(self, keywords_dict, iops, embed=False, oniom=True, low_method=True):
-    
-        #Keywords is supplied as a dictionary to allow easy replacement and updating
-        #keywords_dict = {
-        #    "keyword1":  
-        #        {
-        #            "option1": None,
-        #            "option2": "value1",
-        #        },
-        #    "keyword2": "value2"
-        #    "keyword3": None
-        #}
-        #
-        # is Gaussian equivalent of:
-        # keyword1=(option1,option2=value1) keyword2=value2 keyword3
-        #
-        #
-        # Setting 'oniom' to True returns the full ONIOM keyword, and 'low_method' is ignored
-        # If 'oniom' is False, setting 'low_method' to True returns only the low method keyword
-        # If 'oniom' is False, setting 'low_method' to False returns only the high method keyword
-
+    def _get_keywords_string(self, keywords_dict, iops, embed=False, oniom=True, low_method=True, additional_print=False, use_soft = False):
+        """
+        Return a string of all the keywords and iops for a calculation
+        
+        Keywords is supplied as a dictionary to allow easier replacement and updating
+        keywords_dict = {
+            "keyword1":  
+                {
+                    "option1": None,
+                    "option2": "value1",
+                },
+            "keyword2": "value2"
+            "keyword3": None
+        }
+        
+        is Gaussian equivalent of:
+        keyword1=(option1,option2=value1) keyword2=value2 keyword3
+        
+        additional_print: use #p instead of # to print additional information to Gaussian log
+        embed: Switch on electrostatic embedding.
+        use_soft: If using Amber, force the use of softfirst.
+         
+        Setting 'oniom' to True returns the full ONIOM keyword, and 'low_method' is ignored
+        If 'oniom' is False, setting 'low_method' to True returns only the low method keyword
+        If 'oniom' is False, setting 'low_method' to False returns only the high method keyword
+        """
         strings = []
 
-        if self.settings.global_settings.additional_print:
+        if additional_print:
             strings.append("#p")
         else:
             strings.append("#")
@@ -570,19 +681,20 @@ class ONIOM_Optimiser():
             strings.append(keyword_string)
 
         if oniom:
-            keywords_string = " ".join(strings + [self._get_oniom_keyword(embed)]) +  "\n" + self._get_iop_string(iops)
+            keywords_string = " ".join(strings + [self._get_oniom_keyword(embed = embed, use_soft = use_soft)]) + self._get_iop_string(iops)
         elif low_method:
-            keywords_string = " ".join(strings + [self._get_low_method_keyword()]) +  "\n" + self._get_iop_string(iops)
+            keywords_string = " ".join(strings + [self._get_low_method_keyword(use_soft = use_soft)]) + self._get_iop_string(iops)
         else:
-            keywords_string = " ".join(strings + [self._get_high_method_keyword()]) +  "\n" + self._get_iop_string(iops)
+            keywords_string = " ".join(strings + [self._get_high_method_keyword()]) + self._get_iop_string(iops)
             
         return keywords_string
     
     def _get_atom_info_strings(self):
-        #ONIOM(QM:AMBER) atom line
-        #Build a string with formatting gaps
-        #Charge gaps (f1) to be filled by RESP calc
-        #Position gaps (f3) to be filled by Opt calc
+        """
+        Build a string with formatting gaps
+        Charge gaps (f1) to be filled by RESP calc
+        Position gaps (f3) to be filled by Opt calc
+        """
         
         #Atoms formatting
         f0 = " {:s}-{:s}-"
@@ -620,10 +732,10 @@ class ONIOM_Optimiser():
                 
             self._connectivity_strings.append(s)
             
-    
     def _get_atoms_string(self):
-        #Build the entire atoms section of com file by filling in gaps in atoms_info_strings
-        
+        """
+        Build the entire atoms section of com file by filling in gaps in atoms_info_strings
+        """
         atoms_string = ""
         
         f2 = "{:52s}"
@@ -634,12 +746,15 @@ class ONIOM_Optimiser():
             f0, f1 = self._atom_info_strings[i]
             p = a.position
             
-            atoms_string += f2.format(f0.format(a.amber_charge)) + f1.format(p[0],p[1],p[2]) + "\n"
+            atoms_string += f2.format(f0.format(a.partial_charge)) + f1.format(p[0],p[1],p[2]) + "\n"
             
         return atoms_string
 
-
     def _update_params_from_log(self, log_fn):
+        """
+        Assign parameters to the model region.
+        These should contribute as little to the low model and low real forces as possible.
+        """
 
         def get_torsion_energy(torsionV, theta, phase_offset, nodes):
             return torsionV * (1 + np.cos(np.deg2rad(((nodes + 1)*theta-phase_offset))))
@@ -728,10 +843,14 @@ class ONIOM_Optimiser():
 
         with open("{:s}.log".format(log_fn), "r") as mp_obj:
             mp_lines = mp_obj.readlines()
+            
+        params_settings = self.settings.params_settings
 
-        lengthKeq = str(self._lengthKeq)
-        angleKeq  = str(self._angleKeq)
-        torsionV  = str(self._torsionV)
+        lengthKeq = str(params_settings.lengthKeq)
+        angleKeq  = str(params_settings.angleKeq)
+        torsionV  = str(params_settings.torsionV)
+        
+        self.params.nonbon_string = params_settings.nonbon_string
 
         lengthAtoms  = {}
         angleAtoms  = {}
@@ -763,14 +882,13 @@ class ONIOM_Optimiser():
                 print("Could not resolve: " + mp_line)
                 raise
 
-        for link_i in [i for i,a in enumerate(atoms.links) if atoms.layers[a] == "H"]:
+        for link_i, link in self.links.items():
             i1s = atoms.expand_selection_by_bonds([link_i], include_current_selection=False)
             for i1 in i1s:
                 lengthIndices.append([link_i, i1])
-                i2s = atoms.expand_selection_by_bonds([i1], include_current_selection=False)
+                i2s = atoms.expand_selection_by_bonds([i1], include_current_selection=False, exclude=[link_i])
                 for i2 in i2s:
-                    if i2 != link_i:
-                        angleIndices.append([link_i, i1, i2])
+                    angleIndices.append([link_i, i1, i2])
 
 
         #Get the amber atom types for all lengths
@@ -847,8 +965,6 @@ class ONIOM_Optimiser():
             a0, a1, a2, a3 = k.split('-')
             torsion = ImproperTorsionParam(a0, a1, a2, a3, gamma = phase_offset, v = torsionV, nt = nodes)
             self.params.update_torsion(torsion)
-            
-            
             
 class _ONIOM_Settings(object):
     def __init__(self):
@@ -1017,10 +1133,10 @@ class _Global_Settings(object):
         return self._additional_keywords
     @additional_keywords.setter
     def additional_keywords(self, value):
-        if isinstance(value, str):
+        if isinstance(value, dict):
             self._additional_keywords = value
         else:
-            raise ValueError("'additional_keywords' must be a string, not {}".format(type(value)))
+            raise ValueError("'additional_keywords' must be a dict, not {}".format(type(value)))
             
     @property
     def base_name_prefix(self):
@@ -1286,10 +1402,10 @@ class _Opt_Settings(object):
         return self._base_name
     @base_name.setter
     def base_name(self, value):
-        if isinstance(value, dict):
+        if isinstance(value, str):
             self._base_name = value
         else:
-            raise ValueError("'base_name' must be a dict type, not {}".format(type(value)))
+            raise ValueError("'base_name' must be a string, not {}".format(type(value)))
         
     @property
     def step(self):
@@ -1406,10 +1522,10 @@ class _IRC_Settings(object):
         return self._base_name
     @base_name.setter
     def base_name(self, value):
-        if isinstance(value, dict):
+        if isinstance(value, str):
             self._base_name = value
         else:
-            raise ValueError("'base_name' must be a dict type, not {}".format(type(value)))
+            raise ValueError("'base_name' must be a string, not {}".format(type(value)))
         
     @property
     def step(self):
@@ -1471,7 +1587,10 @@ class _RESP_Settings(object):
             "layer3": 0.5
         }
         
-    def set_charge_distributions(self, layer_1_weight, layer_2_weight, layer_3_weight):
+    def set_charge_distributions(self, link_weight, layer_1_weight, layer_2_weight, layer_3_weight):
+
+        link_weight = float(link_weight)
+        self.resp_charge_distribution["link"] = link_weight
 
         layer_1_weight = float(layer_1_weight)
         self.resp_charge_distribution["layer1"] = layer_1_weight
@@ -1527,10 +1646,10 @@ class _RESP_Settings(object):
         return self._base_name
     @base_name.setter
     def base_name(self, value):
-        if isinstance(value, dict):
+        if isinstance(value, str):
             self._base_name = value
         else:
-            raise ValueError("'base_name' must be a dict type, not {}".format(type(value)))
+            raise ValueError("'base_name' must be a string, not {}".format(type(value)))
         
     @property
     def step(self):
@@ -1597,20 +1716,20 @@ class _RESP_Settings(object):
         return self._resp_max_iterations
     @resp_max_iterations.setter
     def resp_max_iterations(self, value):
-        if isinstance(value, float):
+        if isinstance(value, int):
             self._resp_max_iterations = value
         else:
-            raise ValueError("'resp_max_iterations' must be a float type, not {}".format(type(value)))
+            raise ValueError("'resp_max_iterations' must be an int type, not {}".format(type(value)))
             
     @property
     def resp_charge_distribution(self):
         return self._resp_charge_distribution
     @resp_charge_distribution.setter
     def resp_charge_distribution(self, value):
-        if isinstance(value, float):
+        if isinstance(value, dict):
             self._resp_charge_distribution = value
         else:
-            raise ValueError("'resp_charge_distribution' must be a float type, not {}".format(type(value)))
+            raise ValueError("'resp_charge_distribution' must be a dict type, not {}".format(type(value)))
     
 class _Params_Settings(object):
     def __init__(self):
@@ -1641,7 +1760,7 @@ class _Params_Settings(object):
             "S": "HS"
         }
     
-        self.nonbon = "NonBon 3 1 0 0 0.000 0.000 0.500 0.000 0.000 -1.000"
+        self.nonbon_string = "NonBon 3 1 0 0 0.000 0.000 0.500 0.000 0.000 -1.000"
         self.lengthKeq = 400.00
         self.angleKeq  = 100.00
         self.torsionV  = 4.000
@@ -1691,10 +1810,10 @@ class _Params_Settings(object):
         return self._base_name
     @base_name.setter
     def base_name(self, value):
-        if isinstance(value, dict):
+        if isinstance(value, str):
             self._base_name = value
         else:
-            raise ValueError("'base_name' must be a dict type, not {}".format(type(value)))
+            raise ValueError("'base_name' must be a string, not {}".format(type(value)))
         
     @property
     def step(self):
@@ -1717,14 +1836,14 @@ class _Params_Settings(object):
             raise ValueError("'link_type_dict' must be a dict type, not {}".format(type(value)))
             
     @property
-    def nonbon(self):
-        return self._nonbon
-    @nonbon.setter
-    def nonbon(self, value):
+    def nonbon_string(self):
+        return self._nonbon_string
+    @nonbon_string.setter
+    def nonbon_string(self, value):
         if isinstance(value, str):
-            self._nonbon = value
+            self._nonbon_string = value
         else:
-            raise ValueError("'nonbon' must be a string type, not {}".format(type(value)))
+            raise ValueError("'nonbon_string' must be a string type, not {}".format(type(value)))
             
     @property
     def lengthKeq(self):
