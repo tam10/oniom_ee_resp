@@ -272,7 +272,7 @@ class RESP_Optimiser(object):
                 m = mis[j] 
                 esp_file.write(
                     atom_f.format(
-                        atoms[m].symbol,
+                        atoms[m].element,
                         self.model_positions[j, 0],
                         self.model_positions[j, 1],
                         self.model_positions[j, 2],
