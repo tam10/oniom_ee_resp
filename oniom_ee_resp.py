@@ -50,7 +50,7 @@ class ONIOM_Optimiser():
 
         #Check atoms
         if type(atoms) != Atoms:
-            raise RuntimeError("atoms must be a Protein Extensions Atoms instance")
+            raise TypeError("atoms must be a Protein Extensions Atoms instance")
         self.initial_atoms = self.atoms = atoms
         self.size = len(atoms)
         
@@ -62,9 +62,9 @@ class ONIOM_Optimiser():
         """
 
         if type(model_indices) != list:
-            raise RuntimeError("model_indices must be a list")
+            raise TypeError("model_indices must be a list")
         if len(model_indices) == 0:
-            raise RuntimeError("model_indices is empty")
+            raise TypeError("model_indices is empty")
         self.initial_model_indices = model_indices
         self.get_model_region()
 
@@ -72,7 +72,9 @@ class ONIOM_Optimiser():
         self._get_atom_info_strings()
 
     def set_charges(self, charges):
-
+        """
+        Set the layer charges preceding the atoms section in the Gaussian input file
+        """
         if not hasattr(charges, "__len__"):
             raise TypeError("'charges' must be a list of integers")
         if not all([isinstance(charge, int) for charge in charges]):
@@ -80,7 +82,9 @@ class ONIOM_Optimiser():
         self.settings.global_settings.charges = charges
 
     def set_multiplicities(self, multiplicities):
-
+        """
+        Set the layer multiplicities preceding the atoms section in the Gaussian input file
+        """
         if not hasattr(multiplicities, "__len__"):
             raise TypeError("'multiplicities' must be a list of integers")
         if not all([isinstance(multiplicity, int) for multiplicity in multiplicities]):
@@ -91,13 +95,12 @@ class ONIOM_Optimiser():
         """
         Attach a new Parameters object.
         """
-        
         if not self.links:
             raise RuntimeError("Model region not set")
 
         if params is not None:
             if not isinstance(params, Parameters):
-                raise RuntimeError("'params' must be a Parameters object")
+                raise TypeError("'params' must be a Parameters object")
         self.params = self.initial_params = params
         
     def _initialise_log(self):
@@ -293,6 +296,8 @@ class ONIOM_Optimiser():
                 
             if write_params:
                 com_obj.write(self.params.get_string() + "\n")
+                
+            com_obj.write("\n\n")
         
         
     def calculate_oniom_resp_charges(self, copy_com = False, copy_log = False, copy_chk = False, copy_resp = False):
@@ -325,7 +330,7 @@ class ONIOM_Optimiser():
         self._run_gauss(base_fn, copy_com, copy_log, copy_chk)
         self.update_resps_from_log(base_fn, copy_resp)
         if copy_resp:
-            self.copy_from_node(base_fn + ".resp", self.work)
+            self.copy_from_node(base_fn + ".resp", global_settings.work)
         
         resp_settings.step += 1
         global_settings._last_calc = base_fn
@@ -378,7 +383,7 @@ class ONIOM_Optimiser():
         })
         
         keywords_string = self._get_keywords_string(keywords, iops, additional_print = opt_settings.additional_print)
-        oldchk_fn = "" if recompute_hessian else "{:s}_{:d}".format(opt_settings.base_name, opt_settings.step - 1)
+        oldchk_fn = "" if recompute_hessian else "{:s}{:d}".format(opt_settings.base_name, opt_settings.step - 1)
         
         self.write_com(base_fn, keywords_string, title, oldchk_fn, write_connectivity)
             
@@ -879,7 +884,7 @@ class ONIOM_Optimiser():
                     angleIndices.append([i0, i1, i2])
 
             except(ValueError):
-                print("Could not resolve: " + mp_line)
+                self.log("Could not resolve: " + mp_line)
                 raise
 
         for link_i, link in self.links.items():

@@ -244,7 +244,10 @@ class RESP_Optimiser(object):
         
     def to_resp_file(self, filename, atoms):
         """
-        Write a .resp file that 
+        Write a .resp file that contains:
+            atom positions, esp- and resp-derived charges.
+            ESP positions and values
+            connectivity
         """
         
         def get_model_neighbours(neighbours, index, model_dict):
@@ -291,7 +294,7 @@ class RESP_Optimiser(object):
 
             for j in range(self._len_j):
                 m = mis[j]
-                ns = atoms._neighbours[m]
+                ns = atoms.connectivity[m]
                 esp_file.write(
                     conn_f.format(
                         j,
@@ -389,7 +392,7 @@ class RESP_Optimiser(object):
             sys.stdout.flush()
 
             if converged:
-                print("Converged")
+                self.log("Converged")
                 break
 
             self.model_resp_derived_charges = new_charges.copy()

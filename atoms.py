@@ -849,3 +849,4 @@ class ComReader(object):
 def read_com(fn):
     com_reader = ComReader(fn)
     return com_reader.atoms
+    

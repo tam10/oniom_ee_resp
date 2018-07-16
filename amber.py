@@ -32,6 +32,7 @@ class Parameters(object):
         self.bends = bends
         self.torsions = torsions
         self.improper_torsions = improper_torsions
+        self.nonbon_string = ""
         
     def update_parameters(self, other_params, replace = True):
         """
@@ -922,3 +923,4 @@ class ImproperTorsionParam(object):
                 ]
             )
         )
+    
