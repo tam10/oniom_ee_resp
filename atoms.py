@@ -18,7 +18,7 @@ Created on Tue Jul 10 11:11:40 2018
     GNU General Public License for more details.
 
     You should have received a copy of the GNU General Public License
-    along with LepsPy.  If not, see <http://www.gnu.org/licenses/>.
+    along with oniom_ee_resp.  If not, see <http://www.gnu.org/licenses/>.
 """
 
 import numpy as np

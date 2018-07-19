@@ -18,12 +18,14 @@ Created on Tue Jul 10 11:04:57 2018
     GNU General Public License for more details.
 
     You should have received a copy of the GNU General Public License
-    along with LepsPy.  If not, see <http://www.gnu.org/licenses/>.
+    along with oniom_ee_resp.  If not, see <http://www.gnu.org/licenses/>.
 """
 
 import numpy as np
 from numba import jit
 import sys
+import multiprocessing
+import ctypes
 
 class RESP_Optimiser(object):
     def __init__(self):
@@ -48,7 +50,9 @@ class RESP_Optimiser(object):
         self._convergence_threshold = 0.001
         self._restraint_strength = 0.01
         self._tightness = 0.1
-        self._max_iterations = 20
+        self._max_iterations = 100
+        
+        self._n_procs = 1
         
     def log(self, message):
         print(message)
@@ -56,6 +60,7 @@ class RESP_Optimiser(object):
         
     @property
     def atomic_positions(self):
+        """Array of positions of the atoms associated with this RESP_Optimiser."""
         return self._atomic_positions
     @atomic_positions.setter
     def atomic_positions(self, atomic_positions):
@@ -65,6 +70,8 @@ class RESP_Optimiser(object):
 
     @property
     def atom_potentials(self):
+        """Potentials at atomic sites computed from the density. 
+        Not used"""
         return self._atom_potentials
     @atom_potentials.setter
     def atom_potentials(self, atom_potentials):
@@ -72,6 +79,7 @@ class RESP_Optimiser(object):
 
     @property
     def esp_positions(self):
+        """Array of positions of the ESP points."""
         return self._esp_positions
     @esp_positions.setter
     def esp_positions(self, esp_positions):
@@ -80,6 +88,8 @@ class RESP_Optimiser(object):
 
     @property
     def qm_esps(self):
+        """Potentials at ESP sites computed from the density. 
+        The RESP optimiser fits MM charges that best match these potentials, subject to constraints."""
         return self._qm_esps
     @qm_esps.setter
     def qm_esps(self, qm_esps):
@@ -87,6 +97,8 @@ class RESP_Optimiser(object):
 
     @property
     def mm_esps(self):
+        """Potentials at ESP sites computed from the RESP-derived charges.
+        These potentials are compared with the qm_esps to determine the fitness of the optimisation."""
         return self._mm_esps
     @mm_esps.setter
     def mm_esps(self, mm_esps):
@@ -94,6 +106,9 @@ class RESP_Optimiser(object):
 
     @property
     def esp_derived_charges(self):
+        """ESP-derived charges computed by Gaussian without constraints.
+        Also includes original charges for the real system (Amber charges).
+        These are included for convenient comparison and backward-compatibility."""
         return self._esp_derived_charges
     @esp_derived_charges.setter
     def esp_derived_charges(self, esp_derived_charges):
@@ -102,6 +117,8 @@ class RESP_Optimiser(object):
 
     @property
     def model_esp_derived_charges(self):
+        """ESP-derived charges at the model region computed by Gaussian without constraints.
+        Given in the same order as the model indices."""
         return self._model_esp_derived_charges
     @model_esp_derived_charges.setter
     def model_esp_derived_charges(self, model_esp_derived_charges):
@@ -110,6 +127,8 @@ class RESP_Optimiser(object):
 
     @property
     def resp_derived_charges(self):
+        """RESP-derived charges computed by the RESP_Optimiser.
+        Also includes original charges for the real system (Amber charges)."""
         return self._resp_derived_charges
     @resp_derived_charges.setter
     def resp_derived_charges(self, resp_derived_charges):
@@ -117,6 +136,8 @@ class RESP_Optimiser(object):
 
     @property
     def model_resp_derived_charges(self):
+        """RESP-derived charges at the model region computed by the RESP_Optimiser.
+        Given in the same order as the model indices."""
         return self._model_resp_derived_charges
     @model_resp_derived_charges.setter
     def model_resp_derived_charges(self, model_resp_derived_charges):
@@ -125,6 +146,7 @@ class RESP_Optimiser(object):
 
     @property
     def model_indices(self):
+        """List of atomic indices (starting from 0) representing the atoms in the model region and link atoms"""
         return self._model_indices
     @model_indices.setter
     def model_indices(self, model_indices):
@@ -135,6 +157,7 @@ class RESP_Optimiser(object):
 
     @property
     def model_positions(self):
+        """Array of positions of the model region atoms associated with this RESP_Optimiser."""
         return self._model_positions
     @model_positions.setter
     def model_positions(self, model_positions):
@@ -142,6 +165,7 @@ class RESP_Optimiser(object):
               
     @property
     def convergence_threshold(self):
+        """Stop the optimisation when the maximum charge deviation is below this number."""
         return self._convergence_threshold
     @convergence_threshold.setter
     def convergence_threshold(self, convergence_threshold):
@@ -149,6 +173,7 @@ class RESP_Optimiser(object):
         
     @property
     def restraint_strength(self):
+        """How much to penalise charges from deviating from 0."""
         return self._restraint_strength
     @restraint_strength.setter
     def restraint_strength(self, restraint_strength):
@@ -156,6 +181,7 @@ class RESP_Optimiser(object):
         
     @property
     def tightness(self):
+        """How sharp to make the penalty function."""
         return self._tightness
     @tightness.setter
     def tightness(self, tightness):
@@ -163,19 +189,34 @@ class RESP_Optimiser(object):
         
     @property
     def max_iterations(self):
+        """Kill the optimisation after this many steps."""
         return self._max_iterations
     @max_iterations.setter
     def max_iterations(self, max_iterations):
         self._max_iterations = int(max_iterations)
+
+    @property
+    def n_procs(self):
+        """Number of processors to use for the optimisation.
+        Use numba-optimised code if 1.
+        Switch to multiprocessing code if >1."""
+        return self._n_procs
+    @n_procs.setter
+    def n_procs(self, n_procs):
+        self._n_procs = int(n_procs)
         
     @property
     def total_charge(self):
+        """Constrain total charge to this value."""
         return self._total_charge
     @total_charge.setter
     def total_charge(self, total_charge):
         self._total_charge = float(total_charge)
             
     def from_log(self, log_path):
+        """Get ESP data from a log file.
+        Note that IOp(33=2) must be used to print relevant data.
+        IOp(41=10,42=17) is recommended for improved fitting."""
         with open(log_path, "r") as log_obj:
             lines = log_obj.readlines()
             
@@ -303,6 +344,7 @@ class RESP_Optimiser(object):
                 )
 
     def model_positions_from_indices(self):
+        """Get an array of positions of the model region atoms"""
         self.model_positions = np.zeros((self._len_j, 3))
         _model_positions_from_indices(
             self.model_positions,
@@ -312,6 +354,7 @@ class RESP_Optimiser(object):
         )
         
     def model_esp_charges_from_indices(self):
+        """Get the ESP-derived charges of the model region atoms"""
         self.model_esp_derived_charges = np.zeros((self._len_j))
         _model_esp_charges_from_indices(
             self.model_esp_derived_charges,
@@ -321,7 +364,7 @@ class RESP_Optimiser(object):
         )
         
     def calculate_mm_esps(self):
-        
+        """Compute potentials at ESP points using the RESP-derived charges"""
         self.mm_esps = np.zeros((self._len_i))
         _calculate_mm_esps(
             self.mm_esps,
@@ -347,6 +390,40 @@ class RESP_Optimiser(object):
 
 
     def get_new_charges(self):
+        """Run the optimiser.
+        
+    
+     Aq = B
+    
+     | A11  A12 . . A1n  1 | |   q1   |   |   B1   | 
+     | A21  A22 . . A2n  1 | |   q2   |   |   B2   |
+     |  .    .  .    .     | |   .    |   |   .    |
+     |  .    .   .   .   1 | |   .    | = |   .    |
+     |  .    .    .  .     | |   .    |   |   .    |
+     | An1  An2 . . Ann  1 | |   qn   |   |   Bn   |
+     |  1    1   1   1   0 | | lambda |   |  q_tot |
+    
+      Where Ajk (j!=k) = sum(i){1 / (r_ij * r_ik)}
+            Ajk (j==k) = sum(i){1 / (r_ij ** 2)} + delta(chi_rstr**2)/delta(q_j)
+    
+            delta(chi_rstr**2)/delta(q_j) = a * q_j / ((q_j ** 2 + b ** 2) ** 0.5)
+            a = Scale factor / restraint strength
+            b = Tightness of restraint hyperbola
+    
+            Bj = sum(i){qm_esps[i] / r_ij}
+        
+    
+     
+     Christopher I. Bayly, Piotr Cieplak, Wendy D. Cornell, and Peter A. Kollman
+     J. Phys. Chem. 1993, 97, 10269-10280
+    
+     Brent H. Besler, Kenneth M. Merz, Jr. and Peter A. Kollman
+     J. Comp. Chem, 1990, 11, 431-439
+    
+    """
+        
+        self.log("Performing RESP calculation with {:d} cpu{:s} on {:d} atoms using {:d} ESP points.".format(self.n_procs, "s" if self.n_procs > 1 else "", self._len_j, self._len_i))
+        self.log("Constraining to a total charge of {:7.4f} using restraint strength {:9.6f} and tightness {:9.6f}".format(self.total_charge, self.restraint_strength, self.tightness))
         
         self.resp_derived_charges = np.zeros(len(self.atomic_positions))
 
@@ -367,17 +444,30 @@ class RESP_Optimiser(object):
 
             self.calculate_mm_esps()
                 
-            A = np.zeros((self._len_j + 1, self._len_j + 1))
-            _form_A(
-                A,
-                self.model_resp_derived_charges, 
-                self.esp_positions, 
-                self.model_positions, 
-                self.restraint_strength, 
-                self.tightness,
-                self._len_i,
-                self._len_j
-            )
+            if self.n_procs > 1:
+                A = _multi_form_A(
+                    self.model_resp_derived_charges,
+                    self.esp_positions,
+                    self.model_positions,
+                    self.restraint_strength,
+                    self.tightness,
+                    self._len_i,
+                    self._len_j,
+                    self.n_procs
+                )
+
+            else:
+                A = np.zeros((self._len_j + 1, self._len_j + 1))
+                _form_A(
+                    A,
+                    self.model_resp_derived_charges,
+                    self.esp_positions,
+                    self.model_positions,
+                    self.restraint_strength,
+                    self.tightness,
+                    self._len_i,
+                    self._len_j
+                )
 
             A_inv = np.linalg.inv(A)
 
@@ -471,8 +561,8 @@ def _form_a_jk(p_is, p_js, len_i, j, k):
         
     return sum_i
 
-@jit(signature_or_function="float64(float64[:,:], float64[:,:], int64, int64)", nopython=True)
-def _form_a_jj(p_is, p_js, len_i, j):
+@jit(signature_or_function="float64(float64[:,:], float64[:,:], int64, float64[:], int64, float64, float64)", nopython=True)
+def _form_a_jj(                     p_is,         p_js,         len_i, q_js,       j,     a,       b      ):
     sum_i = 0.
     for i in range(len_i):
         
@@ -483,37 +573,11 @@ def _form_a_jj(p_is, p_js, len_i, j):
         ) ** 0.5
         sum_i += 1. / (r_ij * r_ij)
         
-    return sum_i
+    q_j = q_js[j]
+    return sum_i + a / ((q_j ** 2 + b ** 2) ** 0.5)
 
 @jit(signature_or_function="(float64[:,:], float64[:], float64[:,:],  float64[:,:],    float64,      float64,  int64, int64)", nopython=True)
 def _form_A(                 A,           old_charges, esp_positions, model_positions, scale_factor, tightness, len_i, len_j):
-    
-    # 
-    # Christopher I. Bayly, Piotr Cieplak, Wendy D. Cornell, and Peter A. Kollman
-    # J. Phys. Chem. 1993, 97, 10269-10280
-    #
-    # Brent H. Besler, Kenneth M. Merz, Jr. and Peter A. Kollman
-    # J. Comp. Chem, 1990, 11, 431-439
-    #
-    # Aq = B
-    #
-    # | A11  A12 . . A1n  1 | |   q1   |   |   B1   | 
-    # | A21  A22 . . A2n  1 | |   q2   |   |   B2   |
-    # |  .    .  .    .     | |   .    |   |   .    |
-    # |  .    .   .   .   1 | |   .    | = |   .    |
-    # |  .    .    .  .     | |   .    |   |   .    |
-    # | An1  An2 . . Ann  1 | |   qn   |   |   Bn   |
-    # |  1    1   1   1   0 | | lambda |   |  q_tot |
-    #
-    #  Where Ajk (j!=k) = sum(i){1 / (r_ij * r_ik)}
-    #        Ajk (j==k) = sum(i){1 / (r_ij ** 2)} + delta(chi_rstr**2)/delta(q_j)
-    #
-    #        delta(chi_rstr**2)/delta(q_j) = a * q_j / ((q_j ** 2 + b ** 2) ** 0.5)
-    #        a = Scale factor / restraint strength
-    #        b = Tightness of restraint hyperbola
-    #
-    #        Bj = sum(i){qm_esps[i] / r_ij}
-    # 
     
     q_js = old_charges
     p_is = esp_positions
@@ -534,9 +598,63 @@ def _form_A(                 A,           old_charges, esp_positions, model_posi
                 if j == len_j:
                     A[j,j] = 0.
                 else:
-                    q_j = q_js[j]
-                    #A[j,j] = _form_a_jj(p_is, p_js[j], len_i) + a * q_j / ((q_j ** 2 + b ** 2) ** 0.5)
-                    A[j,j] = _form_a_jj(p_is, p_js, len_i, j) + a / ((q_j ** 2 + b ** 2) ** 0.5)
+                    A[j,j] = _form_a_jj(p_is, p_js, len_i, q_js, j, a, b)
+                    
+def _multi_form_A(old_charges, esp_positions, model_positions, scale_factor, tightness, len_i, len_j, n_procs):
+    
+    def A_chunk(A, q_js, p_is, p_js, a, b, len_i, len_j, j_start, j_end):
+        for j in range(j_start, j_end):
+            for k in range(len_j + 1):
+                if j > k:
+                    if j == len_j:
+                        A[j * (len_j + 1) + k] = A[k * (len_j + 1) + j] = 1.
+                    else:
+                        A[j * (len_j + 1) + k] = A[k * (len_j + 1) + j] = _form_a_jk(p_is, p_js, len_i, j, k)
+
+                elif j == k:
+                    if j == len_j:
+                        A[j * (len_j + 2)] = 0.
+                    else:
+                        A[j * (len_j + 2)] = _form_a_jj(p_is, p_js, len_i, q_js, j, a, b)
+
+    q_js = old_charges
+    p_is = esp_positions
+    p_js = model_positions
+    a = scale_factor
+    b = tightness
+
+    chunk_len = (len_j + n_procs) // n_procs
+
+    shared_A = multiprocessing.Array(ctypes.c_double, (len_j + 1) ** 2)
+
+    procs = []
+
+    for proc_num in range(n_procs):
+        p = multiprocessing.Process(
+            target = A_chunk,
+            args = (
+                shared_A,
+                q_js,
+                p_is,
+                p_js,
+                a,
+                b,
+                len_i,
+                len_j,
+                proc_num * chunk_len,
+                min(len_j + 1, (proc_num + 1) * chunk_len),
+            )
+        )
+        p.start()
+        procs.append(p)
+
+    for proc_num in range(n_procs):
+        procs[proc_num].join()
+
+    A = np.frombuffer(shared_A.get_obj())
+    A = A.reshape((len_j + 1, len_j + 1))
+
+    return A
 
 @jit(signature_or_function="float64(float64[:,:], float64[:,:], int64, int64, float64[:])", nopython=True)
 def _form_b_j(p_is, p_js, len_i, j, V_is):

@@ -18,7 +18,7 @@ Created on Tue Jul 10 11:12:32 2018
     GNU General Public License for more details.
 
     You should have received a copy of the GNU General Public License
-    along with LepsPy.  If not, see <http://www.gnu.org/licenses/>.
+    along with oniom_ee_resp.  If not, see <http://www.gnu.org/licenses/>.
     
 """
 
@@ -46,8 +46,6 @@ class ONIOM_Optimiser():
         self.resp_opt = RESP_Optimiser()
         self.resp_opt.log = self.log
 
-        self._initialise_log()
-
         #Check atoms
         if type(atoms) != Atoms:
             raise TypeError("atoms must be a Protein Extensions Atoms instance")
@@ -71,25 +69,21 @@ class ONIOM_Optimiser():
         #Have to update this if model region changed
         self._get_atom_info_strings()
 
-    def set_charges(self, charges):
+    def set_layer_charges(self, layer_charges):
         """
         Set the layer charges preceding the atoms section in the Gaussian input file
         """
-        if not hasattr(charges, "__len__"):
-            raise TypeError("'charges' must be a list of integers")
-        if not all([isinstance(charge, int) for charge in charges]):
-            raise TypeError("'charges' must be a list of integers")
-        self.settings.global_settings.charges = charges
+        if not hasattr(layer_charges, "__len__") or not all([isinstance(charge, int) for charge in layer_charges]):
+            raise TypeError("'layer_charges' must be a list of integers")
+        self.settings.global_settings.layer_charges = layer_charges
 
-    def set_multiplicities(self, multiplicities):
+    def set_layer_multiplicities(self, layer_multiplicities):
         """
         Set the layer multiplicities preceding the atoms section in the Gaussian input file
         """
-        if not hasattr(multiplicities, "__len__"):
+        if not hasattr(layer_multiplicities, "__len__") or not all([isinstance(multiplicity, int) for multiplicity in layer_multiplicities]):
             raise TypeError("'multiplicities' must be a list of integers")
-        if not all([isinstance(multiplicity, int) for multiplicity in multiplicities]):
-            raise TypeError("'multiplicities' must be a list of integers")
-        self.settings.global_settings.multiplicities = multiplicities
+        self.settings.global_settings.layer_multiplicities = layer_multiplicities
      
     def set_params(self, params):
         """
@@ -169,16 +163,21 @@ class ONIOM_Optimiser():
         
         global_settings = self.settings.global_settings
         resp_settings = self.settings.resp_settings
-        
+
         self.log("Calculating RESP charges from: {}.log".format(log_fn))
         self.resp_opt.from_log(log_fn + ".log")
+        self.resp_opt.n_procs = self.settings.resp_settings.n_procs
 
         models_and_links = self.model_indices + self.links.keys()
         self.resp_opt.model_indices = models_and_links
-        
-        log_str = "RESP on {} atoms using {} ESP Points\n".format(len(self.resp_opt.model_indices), self.resp_opt._len_i)
 
-        self.resp_opt.total_charge = global_settings.charges[-1]
+        if resp_settings.use_layer_charge:
+            #Constrain to the layer charge (integer for sum of resps, possibly non-integer for real system)
+            self.resp_opt.total_charge = global_settings.layer_charges[-1]
+        else:
+            #Constrain to the total charge minus all charges not involved (possibly non-integer for sum of resps, integer for real system)
+            self.resp_opt.total_charge = global_settings.layer_charges[0] - sum([self.atoms.partial_charges[j] for j in range(self.atoms.size) if j not in models_and_links])
+
         self.resp_opt.convergence_threshold = resp_settings.resp_convergence_threshold
         self.resp_opt.restraint_strength = resp_settings.resp_restraint_strength
         self.resp_opt.tightness = resp_settings.resp_restraint_tightness
@@ -200,6 +199,8 @@ class ONIOM_Optimiser():
         layer2_rcd = resp_settings.resp_charge_distribution["layer2"]
         layer3_rcd = resp_settings.resp_charge_distribution["layer3"]
 
+        log_str = "Charge redistribution on {} link atoms\n".format(len(self.links))
+
         for link_i, link in self.links.items():
             link_atom = self.atoms[link_i]
             link_charge = link_atom.partial_charge
@@ -220,32 +221,35 @@ class ONIOM_Optimiser():
 
             log_str += "Layer 1: Weight: {:7.4f}, Distribution: {:7.4f}\n".format(layer1_rcd, layer1_charge_per_atom)
             for layer1_i in layer1:
-                log_str += "Atom {:5d}. Old charge: {:7.4f}, New charge {:7.4f}\n".format(
-                    layer1_i, 
-                    self.atoms[layer1_i].partial_charge,
-                    self.atoms[layer1_i].partial_charge + layer1_charge_per_atom
+                log_str += "Atom {:5d} ({:3s}). Old charge: {:7.4f}, New charge {:7.4f}\n".format(
+                    layer1_i,
+                    self.atoms.elements[layer1_i],
+                    self.atoms.partial_charges[layer1_i],
+                    self.atoms.partial_charges[layer1_i] + layer1_charge_per_atom
                 )
-                
+
                 self.atoms[layer1_i].partial_charge += layer1_charge_per_atom
 
             log_str += "Layer 2: Weight: {:7.4f}, Distribution: {:7.4f}\n".format(layer2_rcd, layer2_charge_per_atom)
             for layer2_i in layer2:
-                log_str += "Atom {:5d}. Old charge: {:7.4f}, New charge {:7.4f}\n".format(
-                    layer2_i, 
-                    self.atoms[layer2_i].partial_charge,
-                    self.atoms[layer2_i].partial_charge + layer2_charge_per_atom
+                log_str += "Atom {:5d} ({:3s}). Old charge: {:7.4f}, New charge {:7.4f}\n".format(
+                    layer2_i,
+                    self.atoms.elements[layer2_i],
+                    self.atoms.partial_charges[layer2_i],
+                    self.atoms.partial_charges[layer2_i] + layer2_charge_per_atom
                 )
-                
+
                 self.atoms[layer2_i].partial_charge += layer2_charge_per_atom
 
             log_str += "Layer 3: Weight: {:7.4f}, Distribution: {:7.4f}\n".format(layer3_rcd, layer3_charge_per_atom)
             for layer3_i in layer3:
-                log_str += "Atom {:5d}. Old charge: {:7.4f}, New charge {:7.4f}\n".format(
-                    layer3_i, 
-                    self.atoms[layer3_i].partial_charge,
-                    self.atoms[layer3_i].partial_charge + layer3_charge_per_atom
+                log_str += "Atom {:5d} ({:3s}). Old charge: {:7.4f}, New charge {:7.4f}\n".format(
+                    layer3_i,
+                    self.atoms.elements[layer3_i],
+                    self.atoms.partial_charges[layer3_i],
+                    self.atoms.partial_charges[layer3_i] + layer3_charge_per_atom
                 )
-                
+
                 self.atoms[layer3_i].partial_charge += layer3_charge_per_atom
 
             link_atom.partial_charge *= link_rcd
@@ -287,7 +291,7 @@ class ONIOM_Optimiser():
             
             com_obj.write("{}\n\n".format(keywords_string))
             com_obj.write("{}\n\n".format(title))
-            com_obj.write(" ".join(["{:d} {:d}".format(global_settings.charges[i], global_settings.multiplicities[i]) for i in range(len(global_settings.charges))]) + "\n")
+            com_obj.write(" ".join(["{:d} {:d}".format(global_settings.layer_charges[i], global_settings.layer_multiplicities[i]) for i in range(len(global_settings.layer_charges))]) + "\n")
 
             com_obj.write(self._get_atoms_string() + "\n")
             
@@ -495,7 +499,7 @@ class ONIOM_Optimiser():
         if not np.abs(sum_charge_distribution - 1) < 0.0001:
             self.log("WARNING: Sum of charge distribution is not 1. Partial charge will not be conserved")
 
-        if not global_settings.charges or not global_settings.multiplicities:
+        if not global_settings.layer_charges or not global_settings.layer_multiplicities:
             raise Exception("Charges and/or multiplicities not set")
 
         if not global_settings.high_method:
@@ -505,6 +509,9 @@ class ONIOM_Optimiser():
             raise Exception("Low method not set")
 
         self._get_atom_info_strings()
+        
+        os.environ["GAUSS_SCRDIR"] = global_settings.gaussian_scratch_directory
+        self._initialise_log()
     
     def run(self, copy_com = False, copy_log = False, copy_chk = False, copy_resp = False):
         """
@@ -513,11 +520,11 @@ class ONIOM_Optimiser():
         self.initialise()
 
         if self.settings.global_settings.irc_mode == True:
-            for step_num in range(self.settings.global_settings.max_overall_steps):
+            for step_num in range(self.settings.global_settings.max_steps):
                 self.calculate_oniom_resp_charges(copy_com, copy_log, copy_chk, copy_resp)
                 self.irc_optimise(copy_com, copy_log, copy_chk)
         else:
-            for step_num in range(self.settings.global_settings.max_overall_steps):
+            for step_num in range(self.settings.global_settings.max_steps):
                 self.calculate_oniom_resp_charges(copy_com, copy_log, copy_chk, copy_resp)
                 self.optimise(copy_com, copy_log, copy_chk)
         
@@ -562,9 +569,15 @@ class ONIOM_Optimiser():
             self.links[link_index] = {"type": link_type, "layer1": layer1, "layer2": layer2, "layer3": layer3}
 
     def set_high_method(self, method, basis=''):
+        """
+        Set the method and basis set to be used for the model region.
+        """
         self.settings.global_settings.set_high_method(method, basis)
 
     def set_low_method(self, method, basis=''):
+        """
+        Set the method and basis set to be used for the real system.
+        """
         self.settings.global_settings.set_low_method(method, basis)
         
     def _get_low_method_keyword(self, use_soft=False):
@@ -616,7 +629,7 @@ class ONIOM_Optimiser():
         
     def _get_iop_string(self, iops):
         """
-        Return a string of iops used in Gaussian from a dictionary.
+        Return a string of IOps used in Gaussian from a dictionary.
         """
         strings = []
         for overlay, options in iops.items():
@@ -631,7 +644,7 @@ class ONIOM_Optimiser():
         """
         Return a string of all the keywords and iops for a calculation
         
-        Keywords is supplied as a dictionary to allow easier replacement and updating
+        Keywords are supplied as a dictionary to allow easier replacement and updating
         keywords_dict = {
             "keyword1":  
                 {
@@ -972,11 +985,19 @@ class ONIOM_Optimiser():
             self.params.update_torsion(torsion)
             
 class _ONIOM_Settings(object):
+    """Settings and options are split into:
+        global_settings
+        opt_settings
+        irc_settings
+        resp_settings
+        params_settings
+        
+        use the help function for more information"""
     def __init__(self):
         self.global_settings = _Global_Settings()
         self.opt_settings    = _Opt_Settings()
         self.irc_settings    = _IRC_Settings()
-        self.resp_settings   = _RESP_Settings()
+        self.resp_settings   = _RESP_Settings(self.global_settings)
         self.params_settings = _Params_Settings()
         
     @property
@@ -987,7 +1008,7 @@ class _ONIOM_Settings(object):
         if isinstance(value, _Global_Settings):
             self._global_settings = value
         else:
-            raise ValueError("'global_settings' must be a _Global_Settings type, not {}".format(type(value)))
+            raise TypeError("'global_settings' must be a _Global_Settings type, not {}".format(type(value)))
             
     @property
     def opt_settings(self):
@@ -997,7 +1018,7 @@ class _ONIOM_Settings(object):
         if isinstance(value, _Opt_Settings):
             self._opt_settings = value
         else:
-            raise ValueError("'opt_settings' must be a _Opt_Settings type, not {}".format(type(value)))
+            raise TypeError("'opt_settings' must be a _Opt_Settings type, not {}".format(type(value)))
             
     @property
     def irc_settings(self):
@@ -1007,7 +1028,7 @@ class _ONIOM_Settings(object):
         if isinstance(value, _IRC_Settings):
             self._irc_settings = value
         else:
-            raise ValueError("'irc_settings' must be a _IRC_Settings type, not {}".format(type(value)))
+            raise TypeError("'irc_settings' must be a _IRC_Settings type, not {}".format(type(value)))
             
     @property
     def resp_settings(self):
@@ -1017,7 +1038,7 @@ class _ONIOM_Settings(object):
         if isinstance(value, _RESP_Settings):
             self._resp_settings = value
         else:
-            raise ValueError("'resp_settings' must be a _RESP_Settings type, not {}".format(type(value)))
+            raise TypeError("'resp_settings' must be a _RESP_Settings type, not {}".format(type(value)))
             
     @property
     def params_settings(self):
@@ -1027,7 +1048,7 @@ class _ONIOM_Settings(object):
         if isinstance(value, _Params_Settings):
             self._params_settings = value
         else:
-            raise ValueError("'params_settings' must be a _Params_Settings type, not {}".format(type(value)))
+            raise TypeError("'params_settings' must be a _Params_Settings type, not {}".format(type(value)))
     
 class _Global_Settings(object):
     def __init__(self):
@@ -1035,6 +1056,8 @@ class _Global_Settings(object):
         self.max_steps = 20
         self.irc_mode = False
         self.additional_keywords = dict()
+        
+        self.gaussian_scratch_directory = "."
         
         self.base_name_prefix  = ""
         self._last_calc = ""
@@ -1044,8 +1067,8 @@ class _Global_Settings(object):
         self._atom_info_strings = []
         self._connectivity_strings = []
 
-        self.charges = []
-        self.multiplicities = []
+        self.layer_charges = []
+        self.layer_multiplicities = []
 
         self.mem_mb = 4000
         self.ncpus = 4
@@ -1067,15 +1090,19 @@ class _Global_Settings(object):
         self.low_basis = ""
 
     def set_high_method(self, method, basis=''):
+        """Set the high (model region) method and basis set for all calculations."""
         self.high_method = method
         self.high_basis = basis
         
     def set_low_method(self, method, basis=''):
+        """Set the low (real system) method and basis set for all calculations."""
         self.low_method = method
         self.low_basis = basis
 
     def set_directories(self, home, work):
-
+        """Define where small (home) and large (work) files go.
+        home: .com, .resp, .log (ONIOM_Optimiser)
+        work: .log (Gaussian), .chk"""
         if not home:
             home = os.environ.get("PBS_O_WORKDIR")
         if not home:
@@ -1111,184 +1138,229 @@ class _Global_Settings(object):
 
             self.mem_mb = mem_int - self.overhead_mem_mb_per_cpu * self.ncpus
             if self.mem_mb < 0:
-                raise Exception("Negative memory allocated")
+                raise ValueError("Negative memory allocated")
     
     @property
     def max_steps(self):
+        """Maximum number of steps to run the ONIOM_Optimiser for."""
         return self._max_steps
     @max_steps.setter
     def max_steps(self, value):
         if isinstance(value, int):
             self._max_steps = value
         else:
-            raise ValueError("'max_steps' must be an int type, not {}".format(type(value)))
+            raise TypeError("'max_steps' must be an int type, not {}".format(type(value)))
         
     @property
     def irc_mode(self):
+        """Use an IRC-following algorithm instead of opt."""
         return self._irc_mode
     @irc_mode.setter
     def irc_mode(self, value):
         if isinstance(value, bool):
             self._irc_mode = value
         else:
-            raise ValueError("'irc_mode' must be a boolean type, not {}".format(type(value)))
+            raise TypeError("'irc_mode' must be a boolean type, not {}".format(type(value)))
             
     @property
     def additional_keywords(self):
+        """Add these keywords to all calculations.
+        
+        Keywords are supplied as a dictionary to allow easier replacement and updating
+        keywords_dict = {
+            "keyword1":  
+                {
+                    "option1": None,
+                    "option2": "value1",
+                },
+            "keyword2": "value2"
+            "keyword3": None
+        }
+        
+        is Gaussian equivalent of:
+        keyword1=(option1,option2=value1) keyword2=value2 keyword3"""
         return self._additional_keywords
     @additional_keywords.setter
     def additional_keywords(self, value):
         if isinstance(value, dict):
             self._additional_keywords = value
         else:
-            raise ValueError("'additional_keywords' must be a dict, not {}".format(type(value)))
+            raise TypeError("'additional_keywords' must be a dict, not {}".format(type(value)))
+            
+    @property
+    def gaussian_scratch_directory(self):
+        """Where to place temporary files to be deleted once calculations is completed."""
+        return self._gaussian_scratch_directory
+    @gaussian_scratch_directory.setter
+    def gaussian_scratch_directory(self, value):
+        if isinstance(value, str):
+            self._gaussian_scratch_directory = value
+        else:
+            raise TypeError("'gaussian_scratch_directory' must be a string type, not {}".format(type(value)))
             
     @property
     def base_name_prefix(self):
+        """Prepend all filenames with this."""
         return self._base_name_prefix
     @base_name_prefix.setter
     def base_name_prefix(self, value):
         if isinstance(value, str):
             self._base_name_prefix = value
         else:
-            raise ValueError("'base_name_prefix' must be a string type, not {}".format(type(value)))
+            raise TypeError("'base_name_prefix' must be a string type, not {}".format(type(value)))
             
     @property
     def last_calc(self):
+        """The filename of the last executed file to be used by oldchk."""
         return self._last_calc
     @last_calc.setter
     def last_calc(self, value):
         raise ValueError("'last_calc' is a read-only property")
             
     @property
-    def charges(self):
-        return self._charges
-    @charges.setter
-    def charges(self, value):
+    def layer_charges(self):
+        """List of charge per ONIOM layer"""
+        return self._layer_charges
+    @layer_charges.setter
+    def layer_charges(self, value):
         if isinstance(value, list):
-            self._charges = value
+            self._layer_charges = value
         else:
-            raise ValueError("'charges' must be a list, not {}".format(type(value)))
+            raise TypeError("'layer_charges' must be a list, not {}".format(type(value)))
             
     @property
-    def multiplicities(self):
-        return self._multiplicities
-    @multiplicities.setter
-    def multiplicities(self, value):
+    def layer_multiplicities(self):
+        """List of spin multiplicity per ONIOM layer"""
+        return self._layer_multiplicities
+    @layer_multiplicities.setter
+    def layer_multiplicities(self, value):
         if isinstance(value, list):
-            self._multiplicities = value
+            self._layer_multiplicities = value
         else:
-            raise ValueError("'multiplicities' must be a list type, not {}".format(type(value)))
+            raise TypeError("'layer_multiplicities' must be a list type, not {}".format(type(value)))
             
     @property
     def mem_mb(self):
+        """Memory in MB available for each calculation"""
         return self._mem_mb
     @mem_mb.setter
     def mem_mb(self, value):
         if isinstance(value, int):
             self._mem_mb = value
         else:
-            raise ValueError("'mem_mb' must be an int type, not {}".format(type(value)))
+            raise TypeError("'mem_mb' must be an int type, not {}".format(type(value)))
             
     @property
     def ncpus(self):
+        """Number of CPUs available for each calculation"""
         return self._ncpus
     @ncpus.setter
     def ncpus(self, value):
         if isinstance(value, int):
             self._ncpus = value
         else:
-            raise ValueError("'ncpus' must be an int type, not {}".format(type(value)))
+            raise TypeError("'ncpus' must be an int type, not {}".format(type(value)))
             
     @property
     def overhead_mem_mb_per_cpu(self):
+        """Subract this many MB per CPU from overall memory"""
         return self._overhead_mem_mb_per_cpu
     @overhead_mem_mb_per_cpu.setter
     def overhead_mem_mb_per_cpu(self, value):
         if isinstance(value, int):
             self._overhead_mem_mb_per_cpu = value
         else:
-            raise ValueError("'overhead_mem_mb_per_cpu' must be an int type, not {}".format(type(value)))
+            raise TypeError("'overhead_mem_mb_per_cpu' must be an int type, not {}".format(type(value)))
             
     @property
     def home(self):
+        """Where small files are copied to.
+        .com, .resp, .log (ONIOM_Optimiser)."""
         return self._home
     @home.setter
     def home(self, value):
         if isinstance(value, str):
             self._home = value
         else:
-            raise ValueError("'home' must be a string, not {}".format(type(value)))
+            raise TypeError("'home' must be a string, not {}".format(type(value)))
             
     @property
     def work(self):
+        """Where large files are copied to.
+        .log (Gaussian), .chk"""
         return self._work
     @work.setter
     def work(self, value):
         if isinstance(value, str):
             self._work = value
         else:
-            raise ValueError("'work' must be a string, not {}".format(type(value)))
+            raise TypeError("'work' must be a string, not {}".format(type(value)))
             
     @property
     def log_fn(self):
+        """Filename of the ONIOM_Optimiser log"""
         return self._log_fn
     @log_fn.setter
     def log_fn(self, value):
         if isinstance(value, str):
             self._log_fn = value
         else:
-            raise ValueError("'log_fn' must be a string, not {}".format(type(value)))
+            raise TypeError("'log_fn' must be a string, not {}".format(type(value)))
             
     @property
     def gaussian_run_command(self):
+        """The command used to execute Gaussian in a shell."""
         return self._gaussian_run_command
     @gaussian_run_command.setter
     def gaussian_run_command(self, value):
         if isinstance(value, str):
             self._gaussian_run_command = value
         else:
-            raise ValueError("'gaussian_run_command' must be a string, not {}".format(type(value)))
+            raise TypeError("'gaussian_run_command' must be a string, not {}".format(type(value)))
             
     @property
     def high_method(self):
+        """The high (model region) method for all calculations."""
         return self._high_method
     @high_method.setter
     def high_method(self, value):
         if isinstance(value, str):
             self._high_method = value
         else:
-            raise ValueError("'high_method' must be a string, not {}".format(type(value)))
+            raise TypeError("'high_method' must be a string, not {}".format(type(value)))
             
     @property
     def high_basis(self):
+        """The high (model region) basis set for all calculations."""
         return self._high_basis
     @high_basis.setter
     def high_basis(self, value):
         if isinstance(value, str):
             self._high_basis = value
         else:
-            raise ValueError("'high_basis' must be a string, not {}".format(type(value)))
+            raise TypeError("'high_basis' must be a string, not {}".format(type(value)))
             
     @property
     def low_method(self):
+        """Set the low (real system) method for all calculations."""
         return self._low_method
     @low_method.setter
     def low_method(self, value):
         if isinstance(value, str):
             self._low_method = value
         else:
-            raise ValueError("'low_method' must be a string, not {}".format(type(value)))
+            raise TypeError("'low_method' must be a string, not {}".format(type(value)))
             
     @property
     def low_basis(self):
+        """Set the low (real system) basis set for all calculations."""
         return self._low_basis
     @low_basis.setter
     def low_basis(self, value):
         if isinstance(value, str):
             self._low_basis = value
         else:
-            raise ValueError("'low_basis' must be a string, not {}".format(type(value)))
+            raise TypeError("'low_basis' must be a string, not {}".format(type(value)))
                 
 class _Opt_Settings(object):
     def __init__(self):
@@ -1314,123 +1386,164 @@ class _Opt_Settings(object):
         
     @property
     def restart(self):
+        """A flag used for a restart calculation.
+        Set to True if restarting."""
         return self._restart
     @restart.setter
     def restart(self, value):
         if isinstance(value, bool):
             self._restart = value
         else:
-            raise ValueError("'restart' must be a boolean type, not {}".format(type(value)))
+            raise TypeError("'restart' must be a boolean type, not {}".format(type(value)))
         
     @property
     def max_steps(self):
+        """Maximum number of steps allowed in an optimisation calculation before running another calulation"""
         return self._max_steps
     @max_steps.setter
     def max_steps(self, value):
         if isinstance(value, int):
             self._max_steps = value
         else:
-            raise ValueError("'max_steps' must be an int type, not {}".format(type(value)))
+            raise TypeError("'max_steps' must be an int type, not {}".format(type(value)))
         
     @property
     def max_mm_steps(self):
+        """Maximum number of MM steps allowed in an optimisation step"""
         return self._max_mm_steps
     @max_mm_steps.setter
     def max_mm_steps(self, value):
         if isinstance(value, int):
             self._max_mm_steps = value
         else:
-            raise ValueError("'max_mm_steps' must be an int type, not {}".format(type(value)))
+            raise TypeError("'max_mm_steps' must be an int type, not {}".format(type(value)))
         
     @property
     def step_size(self):
+        """Maximum optimisation step size."""
         return self._step_size
     @step_size.setter
     def step_size(self, value):
         if isinstance(value, int):
             self._step_size = value
         else:
-            raise ValueError("'step_size' must be an int type, not {}".format(type(value)))
+            raise TypeError("'step_size' must be an int type, not {}".format(type(value)))
         
     @property
     def steps_per_hessian(self):
+        """Maximum number of optimisation calculations before running a hessian calculation"""
         return self._steps_per_hessian
     @steps_per_hessian.setter
     def steps_per_hessian(self, value):
         if isinstance(value, int):
             self._steps_per_hessian = value
         else:
-            raise ValueError("'steps_per_hessian' must be an int type, not {}".format(type(value)))
+            raise TypeError("'steps_per_hessian' must be an int type, not {}".format(type(value)))
         
     @property
     def keywords(self):
+        """Keywords to use for an optimisation calculation.
+        
+        Keywords are supplied as a dictionary to allow easier replacement and updating
+        keywords_dict = {
+            "keyword1":  
+                {
+                    "option1": None,
+                    "option2": "value1",
+                },
+            "keyword2": "value2"
+            "keyword3": None
+        }
+        
+        is Gaussian equivalent of:
+        keyword1=(option1,option2=value1) keyword2=value2 keyword3"""
         return self._keywords
     @keywords.setter
     def keywords(self, value):
         if isinstance(value, dict):
             self._keywords = value
         else:
-            raise ValueError("'keywords' must be a dict type, not {}".format(type(value)))
+            raise TypeError("'keywords' must be a dict type, not {}".format(type(value)))
         
     @property
     def additional_keywords(self):
+        """Keywords that will override any defaults. Rarely used.
+        
+        Keywords are supplied as a dictionary to allow easier replacement and updating
+        keywords_dict = {
+            "keyword1":  
+                {
+                    "option1": None,
+                    "option2": "value1",
+                },
+            "keyword2": "value2"
+            "keyword3": None
+        }
+        
+        is Gaussian equivalent of:
+        keyword1=(option1,option2=value1) keyword2=value2 keyword3"""
         return self._additional_keywords
     @additional_keywords.setter
     def additional_keywords(self, value):
         if isinstance(value, dict):
             self._additional_keywords = value
         else:
-            raise ValueError("'additional_keywords' must be a dict type, not {}".format(type(value)))
+            raise TypeError("'additional_keywords' must be a dict type, not {}".format(type(value)))
         
     @property
     def iops(self):
+        """Dict of IOps to be used in Opt calculations."""
         return self._iops
     @iops.setter
     def iops(self, value):
         if isinstance(value, dict):
             self._iops = value
         else:
-            raise ValueError("'iops' must be a dict type, not {}".format(type(value)))
+            raise TypeError("'iops' must be a dict type, not {}".format(type(value)))
         
     @property
     def additional_print(self):
+        """Whether to use #p in Opt calculations."""
         return self._additional_print
     @additional_print.setter
     def additional_print(self, value):
         if isinstance(value, bool):
             self._additional_print = value
         else:
-            raise ValueError("'additional_print' must be a boolean type, not {}".format(type(value)))
+            raise TypeError("'additional_print' must be a boolean type, not {}".format(type(value)))
         
     @property
     def base_name(self):
+        """Prepend all Opt calculations with this."""
         return self._base_name
     @base_name.setter
     def base_name(self, value):
         if isinstance(value, str):
             self._base_name = value
         else:
-            raise ValueError("'base_name' must be a string, not {}".format(type(value)))
+            raise TypeError("'base_name' must be a string, not {}".format(type(value)))
         
     @property
     def step(self):
+        """The number step of the current Opt calculation."""
         return self._step
     @step.setter
     def step(self, value):
         if isinstance(value, int):
             self._step = value
         else:
-            raise ValueError("'step' must be an int type, not {}".format(type(value)))
+            raise TypeError("'step' must be an int type, not {}".format(type(value)))
         
     @property
     def converged(self):
+        """Flag if last calculation converged."""
         return self._converged
     @converged.setter
     def converged(self, value):
         if isinstance(value, bool):
             self._converged = value
         else:
-            raise ValueError("'converged' must be a boolean type, not {}".format(type(value)))
+            raise TypeError("'converged' must be a boolean type, not {}".format(type(value)))
     
 class _IRC_Settings(object):
     def __init__(self):
@@ -1454,106 +1567,148 @@ class _IRC_Settings(object):
         
     @property
     def max_steps(self):
+        """Maximum number of steps allowed in an IRC calculation before running another calulation"""
         return self._max_steps
     @max_steps.setter
     def max_steps(self, value):
         if isinstance(value, int):
             self._max_steps = value
         else:
-            raise ValueError("'max_steps' must be an int type, not {}".format(type(value)))
+            raise TypeError("'max_steps' must be an int type, not {}".format(type(value)))
         
     @property
     def max_mm_steps(self):
+        #Ignored?
+        """Maximum number of MM steps allowed in an IRC step"""
         return self._max_mm_steps
     @max_mm_steps.setter
     def max_mm_steps(self, value):
         if isinstance(value, int):
             self._max_mm_steps = value
         else:
-            raise ValueError("'max_mm_steps' must be an int type, not {}".format(type(value)))
+            raise TypeError("'max_mm_steps' must be an int type, not {}".format(type(value)))
         
     @property
     def step_size(self):
+        """Maximum IRC step size."""
         return self._step_size
     @step_size.setter
     def step_size(self, value):
         if isinstance(value, int):
             self._step_size = value
         else:
-            raise ValueError("'step_size' must be an int type, not {}".format(type(value)))
+            raise TypeError("'step_size' must be an int type, not {}".format(type(value)))
         
     @property
     def keywords(self):
+        """Keywords to use for an optimisation calculation.
+        
+        Keywords are supplied as a dictionary to allow easier replacement and updating
+        keywords_dict = {
+            "keyword1":  
+                {
+                    "option1": None,
+                    "option2": "value1",
+                },
+            "keyword2": "value2"
+            "keyword3": None
+        }
+        
+        is Gaussian equivalent of:
+        keyword1=(option1,option2=value1) keyword2=value2 keyword3"""
         return self._keywords
     @keywords.setter
     def keywords(self, value):
         if isinstance(value, dict):
             self._keywords = value
         else:
-            raise ValueError("'keywords' must be a dict type, not {}".format(type(value)))
+            raise TypeError("'keywords' must be a dict type, not {}".format(type(value)))
         
     @property
     def additional_keywords(self):
+        """Keywords that will override any defaults. Rarely used.
+        
+        Keywords are supplied as a dictionary to allow easier replacement and updating
+        keywords_dict = {
+            "keyword1":  
+                {
+                    "option1": None,
+                    "option2": "value1",
+                },
+            "keyword2": "value2"
+            "keyword3": None
+        }
+        
+        is Gaussian equivalent of:
+        keyword1=(option1,option2=value1) keyword2=value2 keyword3"""
         return self._additional_keywords
     @additional_keywords.setter
     def additional_keywords(self, value):
         if isinstance(value, dict):
             self._additional_keywords = value
         else:
-            raise ValueError("'additional_keywords' must be a dict type, not {}".format(type(value)))
+            raise TypeError("'additional_keywords' must be a dict type, not {}".format(type(value)))
         
     @property
     def iops(self):
+        """Dict of IOps to be used in IRC calculations."""
         return self._iops
     @iops.setter
     def iops(self, value):
         if isinstance(value, dict):
             self._iops = value
         else:
-            raise ValueError("'iops' must be a dict type, not {}".format(type(value)))
+            raise TypeError("'iops' must be a dict type, not {}".format(type(value)))
         
     @property
     def additional_print(self):
+        """Whether to use #p in IRC calculations."""
         return self._additional_print
     @additional_print.setter
     def additional_print(self, value):
         if isinstance(value, bool):
             self._additional_print = value
         else:
-            raise ValueError("'additional_print' must be a boolean type, not {}".format(type(value)))
+            raise TypeError("'additional_print' must be a boolean type, not {}".format(type(value)))
         
     @property
     def base_name(self):
+        """Prepend all IRC calculations with this."""
         return self._base_name
     @base_name.setter
     def base_name(self, value):
         if isinstance(value, str):
             self._base_name = value
         else:
-            raise ValueError("'base_name' must be a string, not {}".format(type(value)))
+            raise TypeError("'base_name' must be a string, not {}".format(type(value)))
         
     @property
     def step(self):
+        """The step number of the current IRC calculation."""
         return self._step
     @step.setter
     def step(self, value):
         if isinstance(value, int):
             self._step = value
         else:
-            raise ValueError("'step' must be an int type, not {}".format(type(value)))
+            raise TypeError("'step' must be an int type, not {}".format(type(value)))
         
     @property
     def converged(self):
+        """Flag if last calculation converged."""
         return self._converged
     @converged.setter
     def converged(self, value):
         if isinstance(value, bool):
             self._converged = value
         else:
-            raise ValueError("'converged' must be a boolean type, not {}".format(type(value)))
+            raise TypeError("'converged' must be a boolean type, not {}".format(type(value)))
     
-class _RESP_Settings(object):
-    def __init__(self):
+class _RESP_Settings(object):    
+    def __init__(self, global_settings):
+
+        self.global_settings = global_settings
+        self.use_all_available_cpus = True
         
         self.keywords = {
             "geom": "connectivity",
@@ -1584,6 +1739,7 @@ class _RESP_Settings(object):
         self.resp_restraint_strength = 0.01
         self.resp_restraint_tightness = 0.1
         self.resp_max_iterations = 20
+        self.use_layer_charge = True
         
         self.resp_charge_distribution = {
             "link"  : 0.0,
@@ -1607,134 +1763,238 @@ class _RESP_Settings(object):
         self.resp_charge_distribution["layer3"] = layer_3_weight
 
     @property
+    def global_settings(self):
+        """A reference to the global settings."""
+        return self._global_settings
+    @global_settings.setter
+    def global_settings(self, value):
+        if isinstance(value, _Global_Settings):
+            self._global_settings = value
+        else:
+            raise TypeError("'global_settings' must be an _ONIOM_Settings type, not {}".format(type(value)))
+
+    @property
+    def n_procs(self):
+        """Number of CPUs to use for RESP optimisations"""
+        return self._n_procs
+    @n_procs.setter
+    def n_procs(self, value):
+        if isinstance(value, int):
+            self._n_procs = value
+        else:
+            raise TypeError("'n_procs' must be an int type, not {}".format(type(value)))
+
+    @property
+    def use_all_available_cpus(self):
+        """When set to true, use the same number of CPUs as defined in global_settings"""
+        return self._use_all_available_cpus
+    @use_all_available_cpus.setter
+    def use_all_available_cpus(self, value):
+        if isinstance(value, bool):
+            self._use_all_available_cpus = value
+            if value:
+                self.n_procs = self.global_settings.ncpus
+            else:
+                self.n_procs = 1
+        else:
+            raise TypeError("'use_all_available_cpus' must be a bool type, not {}".format(type(value)))
+
+    @property
     def keywords(self):
+        """Keywords to use for a Gaussian ESP calculation.
+        
+        Keywords are supplied as a dictionary to allow easier replacement and updating
+        keywords_dict = {
+            "keyword1":  
+                {
+                    "option1": None,
+                    "option2": "value1",
+                },
+            "keyword2": "value2"
+            "keyword3": None
+        }
+        
+        is Gaussian equivalent of:
+        keyword1=(option1,option2=value1) keyword2=value2 keyword3"""
         return self._keywords
     @keywords.setter
     def keywords(self, value):
         if isinstance(value, dict):
             self._keywords = value
         else:
-            raise ValueError("'keywords' must be a dict type, not {}".format(type(value)))
+            raise TypeError("'keywords' must be a dict type, not {}".format(type(value)))
         
     @property
     def additional_keywords(self):
+        """Keywords that will override any defaults. Rarely used.
+        
+        Keywords are supplied as a dictionary to allow easier replacement and updating
+        keywords_dict = {
+            "keyword1":  
+                {
+                    "option1": None,
+                    "option2": "value1",
+                },
+            "keyword2": "value2"
+            "keyword3": None
+        }
+        
+        is Gaussian equivalent of:
+        keyword1=(option1,option2=value1) keyword2=value2 keyword3"""
         return self._additional_keywords
     @additional_keywords.setter
     def additional_keywords(self, value):
         if isinstance(value, dict):
             self._additional_keywords = value
         else:
-            raise ValueError("'additional_keywords' must be a dict type, not {}".format(type(value)))
+            raise TypeError("'additional_keywords' must be a dict type, not {}".format(type(value)))
         
     @property
     def iops(self):
+        """Dict of IOps to be used in Gaussian ESP calculations."""
         return self._iops
     @iops.setter
     def iops(self, value):
         if isinstance(value, dict):
             self._iops = value
         else:
-            raise ValueError("'iops' must be a dict type, not {}".format(type(value)))
+            raise TypeError("'iops' must be a dict type, not {}".format(type(value)))
         
     @property
     def additional_print(self):
+        """Whether to use #p in Gaussian ESP calculations."""
         return self._additional_print
     @additional_print.setter
     def additional_print(self, value):
         if isinstance(value, bool):
             self._additional_print = value
         else:
-            raise ValueError("'additional_print' must be a boolean type, not {}".format(type(value)))
+            raise TypeError("'additional_print' must be a boolean type, not {}".format(type(value)))
         
     @property
     def base_name(self):
+        """Prepend all Gaussian ESP calculations with this."""
         return self._base_name
     @base_name.setter
     def base_name(self, value):
         if isinstance(value, str):
             self._base_name = value
         else:
-            raise ValueError("'base_name' must be a string, not {}".format(type(value)))
+            raise TypeError("'base_name' must be a string, not {}".format(type(value)))
         
     @property
     def step(self):
+        """The step number of the current Opt calculation."""
         return self._step
     @step.setter
     def step(self, value):
         if isinstance(value, int):
             self._step = value
         else:
-            raise ValueError("'step' must be an int type, not {}".format(type(value)))
+            raise TypeError("'step' must be an int type, not {}".format(type(value)))
         
     @property
     def converged(self):
+        """Flag if last calculation converged."""
         return self._converged
     @converged.setter
     def converged(self, value):
         if isinstance(value, bool):
             self._converged = value
         else:
-            raise ValueError("'converged' must be a boolean type, not {}".format(type(value)))
+            raise TypeError("'converged' must be a boolean type, not {}".format(type(value)))
         
     @property
     def use_embed(self):
+        """Use electrostatic embedding to compute ESPs (recommended)."""
         return self._use_embed
     @use_embed.setter
     def use_embed(self, value):
         if isinstance(value, bool):
             self._use_embed = value
         else:
-            raise ValueError("'use_embed' must be a boolean type, not {}".format(type(value)))
+            raise TypeError("'use_embed' must be a boolean type, not {}".format(type(value)))
             
     @property
     def resp_convergence_threshold(self):
+        """Stop the optimisation when the maximum charge deviation is below this number."""
         return self._resp_convergence_threshold
     @resp_convergence_threshold.setter
     def resp_convergence_threshold(self, value):
         if isinstance(value, float):
             self._resp_convergence_threshold = value
         else:
-            raise ValueError("'resp_convergence_threshold' must be a float type, not {}".format(type(value)))
+            raise TypeError("'resp_convergence_threshold' must be a float type, not {}".format(type(value)))
             
     @property
     def resp_restraint_strength(self):
+        """How much to penalise charges from deviating from 0."""
         return self._resp_restraint_strength
     @resp_restraint_strength.setter
     def resp_restraint_strength(self, value):
         if isinstance(value, float):
             self._resp_restraint_strength = value
         else:
-            raise ValueError("'resp_restraint_strength' must be a float type, not {}".format(type(value)))
+            raise TypeError("'resp_restraint_strength' must be a float type, not {}".format(type(value)))
             
     @property
     def resp_restraint_tightness(self):
+        """How sharp to make the penalty function."""
         return self._resp_restraint_tightness
     @resp_restraint_tightness.setter
     def resp_restraint_tightness(self, value):
         if isinstance(value, float):
             self._resp_restraint_tightness = value
         else:
-            raise ValueError("'resp_restraint_tightness' must be a float type, not {}".format(type(value)))
+            raise TypeError("'resp_restraint_tightness' must be a float type, not {}".format(type(value)))
             
     @property
     def resp_max_iterations(self):
+        """Kill the optimisation after this many steps."""
         return self._resp_max_iterations
     @resp_max_iterations.setter
     def resp_max_iterations(self, value):
         if isinstance(value, int):
             self._resp_max_iterations = value
         else:
-            raise ValueError("'resp_max_iterations' must be an int type, not {}".format(type(value)))
+            raise TypeError("'resp_max_iterations' must be an int type, not {}".format(type(value)))
+
+    @property
+    def use_layer_charge(self):
+        """Whether to use the layer charge to constrain the total charge.
+        If True:
+            Constrain to the layer charge (integer for sum of resps, possibly non-integer for real system)
+        If False:
+            Constrain to the total charge minus all charges not involved (possibly non-integer for sum of resps, integer for real system)"""
+        return self._use_layer_charge
+    @use_layer_charge.setter
+    def use_layer_charge(self, value):
+        if isinstance(value, bool):
+            self._use_layer_charge = value
+        else:
+            raise TypeError("'use_layer_charge' must be a boolean type, not {}".format(type(value)))
             
     @property
     def resp_charge_distribution(self):
+        """A dictionary containing the distibution of charges from the link atom after a RESP optimisation.
+        Items:
+            link:
+                charge multiplier for the link atom
+            layer1:
+                charge multiplier for the link's neighbour
+            layer2:
+                charge multiplier for layer1's neighbour/s
+            layer3:
+                charge multiplier for layer2's neighbour/s
+        
+        The sum of values of this dictionary should equal 1"""
         return self._resp_charge_distribution
     @resp_charge_distribution.setter
     def resp_charge_distribution(self, value):
         if isinstance(value, dict):
             self._resp_charge_distribution = value
         else:
-            raise ValueError("'resp_charge_distribution' must be a dict type, not {}".format(type(value)))
+            raise TypeError("'resp_charge_distribution' must be a dict type, not {}".format(type(value)))
     
 class _Params_Settings(object):
     def __init__(self):
@@ -1772,111 +2032,150 @@ class _Params_Settings(object):
         
     @property
     def keywords(self):
+        """Keywords to use for a missing parameters calculation.
+        
+        Keywords are supplied as a dictionary to allow easier replacement and updating
+        keywords_dict = {
+            "keyword1":  
+                {
+                    "option1": None,
+                    "option2": "value1",
+                },
+            "keyword2": "value2"
+            "keyword3": None
+        }
+        
+        is Gaussian equivalent of:
+        keyword1=(option1,option2=value1) keyword2=value2 keyword3"""
         return self._keywords
     @keywords.setter
     def keywords(self, value):
         if isinstance(value, dict):
             self._keywords = value
         else:
-            raise ValueError("'keywords' must be a dict type, not {}".format(type(value)))
+            raise TypeError("'keywords' must be a dict type, not {}".format(type(value)))
         
     @property
     def additional_keywords(self):
+        """Keywords that will override any defaults. Rarely used.
+        
+        Keywords are supplied as a dictionary to allow easier replacement and updating
+        keywords_dict = {
+            "keyword1":  
+                {
+                    "option1": None,
+                    "option2": "value1",
+                },
+            "keyword2": "value2"
+            "keyword3": None
+        }
+        
+        is Gaussian equivalent of:
+        keyword1=(option1,option2=value1) keyword2=value2 keyword3"""
         return self._additional_keywords
     @additional_keywords.setter
     def additional_keywords(self, value):
         if isinstance(value, dict):
             self._additional_keywords = value
         else:
-            raise ValueError("'additional_keywords' must be a dict type, not {}".format(type(value)))
+            raise TypeError("'additional_keywords' must be a dict type, not {}".format(type(value)))
         
     @property
     def iops(self):
+        """Dict of IOps to be used in missing parameters calculations."""
         return self._iops
     @iops.setter
     def iops(self, value):
         if isinstance(value, dict):
             self._iops = value
         else:
-            raise ValueError("'iops' must be a dict type, not {}".format(type(value)))
+            raise TypeError("'iops' must be a dict type, not {}".format(type(value)))
         
     @property
     def additional_print(self):
+        """Whether to use #p in missing parameters calculations."""
         return self._additional_print
     @additional_print.setter
     def additional_print(self, value):
         if isinstance(value, bool):
             self._additional_print = value
         else:
-            raise ValueError("'additional_print' must be a boolean type, not {}".format(type(value)))
+            raise TypeError("'additional_print' must be a boolean type, not {}".format(type(value)))
         
     @property
     def base_name(self):
+        """Prepend all missing parameters calculations with this."""
         return self._base_name
     @base_name.setter
     def base_name(self, value):
         if isinstance(value, str):
             self._base_name = value
         else:
-            raise ValueError("'base_name' must be a string, not {}".format(type(value)))
+            raise TypeError("'base_name' must be a string, not {}".format(type(value)))
         
     @property
     def step(self):
+        """The number step of the current missing parameters calculation."""
         return self._step
     @step.setter
     def step(self, value):
         if isinstance(value, int):
             self._step = value
         else:
-            raise ValueError("'step' must be an int type, not {}".format(type(value)))
+            raise TypeError("'step' must be an int type, not {}".format(type(value)))
         
     @property
     def link_type_dict(self):
+        """Decides what the link atom Amber type should be based on what its neighbour's Amber type is."""
         return self._link_type_dict
     @link_type_dict.setter
     def link_type_dict(self, value):
         if isinstance(value, dict):
             self._link_type_dict = value
         else:
-            raise ValueError("'link_type_dict' must be a dict type, not {}".format(type(value)))
+            raise TypeError("'link_type_dict' must be a dict type, not {}".format(type(value)))
             
     @property
     def nonbon_string(self):
+        """Non-bonding terms string to be used for Gaussian calculations."""
         return self._nonbon_string
     @nonbon_string.setter
     def nonbon_string(self, value):
         if isinstance(value, str):
             self._nonbon_string = value
         else:
-            raise ValueError("'nonbon_string' must be a string type, not {}".format(type(value)))
+            raise TypeError("'nonbon_string' must be a string type, not {}".format(type(value)))
             
     @property
     def lengthKeq(self):
+        """Default length force constant."""
         return self._lengthKeq
     @lengthKeq.setter
     def lengthKeq(self, value):
         if isinstance(value, float):
             self._lengthKeq = value
         else:
-            raise ValueError("'lengthKeq' must be a float type, not {}".format(type(value)))
+            raise TypeError("'lengthKeq' must be a float type, not {}".format(type(value)))
             
     @property
     def angleKeq(self):
+        """Default angle force constant."""
         return self._angleKeq
     @angleKeq.setter
     def angleKeq(self, value):
         if isinstance(value, float):
             self._angleKeq = value
         else:
-            raise ValueError("'angleKeq' must be a float type, not {}".format(type(value)))
+            raise TypeError("'angleKeq' must be a float type, not {}".format(type(value)))
             
     @property
     def torsionV(self):
+        """Default torsion force constant."""
         return self._torsionV
     @torsionV.setter
     def torsionV(self, value):
         if isinstance(value, float):
             self._torsionV = value
         else:
-            raise ValueError("'torsionV' must be a float type, not {}".format(type(value)))
+            raise TypeError("'torsionV' must be a float type, not {}".format(type(value)))
             
