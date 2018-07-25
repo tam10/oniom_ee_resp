@@ -422,7 +422,7 @@ class RESP_Optimiser(object):
     
     """
         
-        self.log("Performing RESP calculation with {:d} cpu{:s} on {:d} atoms using {:d} ESP points.".format(self.n_procs, "s" if self.n_procs > 1 else "", self._len_j, self._len_i))
+        self.log("Performing RESP calculation with {:d} CPU{:s} on {:d} atoms using {:d} ESP points.".format(self.n_procs, "s" if self.n_procs > 1 else "", self._len_j, self._len_i))
         self.log("Constraining to a total charge of {:7.4f} using restraint strength {:9.6f} and tightness {:9.6f}".format(self.total_charge, self.restraint_strength, self.tightness))
         
         self.resp_derived_charges = np.zeros(len(self.atomic_positions))
@@ -469,9 +469,7 @@ class RESP_Optimiser(object):
                     self._len_j
                 )
 
-            A_inv = np.linalg.inv(A)
-
-            q = np.dot(B, A_inv)
+            q = np.linalg.solve(A, B)
 
             new_charges = q[:-1]
             lagrange = q[-1]
