@@ -89,7 +89,6 @@ class Atoms(object):
             residue_names = []
             residue_numbers = []
             layers = []
-            links = []
                 
             for atom in atoms:
                 if not type(atom) == Atom:
@@ -106,7 +105,6 @@ class Atoms(object):
                 residue_names.append(atom.residue_name)
                 residue_numbers.append(atom.residue_number)
                 layers.append(atom.layer)
-                links.append(atom.link)
                 
             self._positions = np.array(positions)
             self.elements = elements
@@ -119,8 +117,12 @@ class Atoms(object):
             self.residue_names = residue_names
             self.residue_numbers = residue_numbers
             self.layers = layers
-            self.links = links
-            self.connectivity = connectivity
+            if isinstance(atoms, Atoms):
+                self.links = atoms.links
+                self.connectivity = atoms.connectivity
+            else:
+                self.links = links
+                self.connectivity = connectivity
 
         else:
             positions = np.array(positions)
